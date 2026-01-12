@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Net.WebSockets;
 using Websocket.Client;
 using Microsoft.Extensions.Configuration;
-
+// First Commit to Test
 namespace Syntery.AdminClient
 {
     internal class Program
