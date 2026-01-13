@@ -56,6 +56,50 @@ namespace CloudDemoNet8
             });
         }
 
+        public async Task LogAttendanceAsync(int? enrollId, string deviceSn, DateTime time, double? distance)
+        {
+            using var conn = CreateConnection();
+
+            // 1️ Get THIS USER'S last scan time only
+            const string lastScanSql = @"
+                SELECT TOP 1 attendattime
+                FROM tblattendance_face
+                WHERE enrollid = @EnrollId
+                ORDER BY attendattime DESC";
+
+            var lastScanTime = await conn.ExecuteScalarAsync<DateTime?>(lastScanSql,new { EnrollId = enrollId });
+
+            // 2️ Block double scan within 20 seconds
+            if (lastScanTime.HasValue && (time - lastScanTime.Value).TotalSeconds < 20)
+            {
+                return; // same user scanned too fast → ignore
+            }
+
+            // 3️ Insert attendance
+            const string insertSql = @"
+        INSERT INTO tblattendance_face (enrollid, device, attendattime)
+        VALUES (@EnrollId, @Device, @Time)";
+
+            await conn.ExecuteAsync(insertSql, new
+            {
+                EnrollId = enrollId,
+                Device = deviceSn,
+                Time = time
+            });
+
+            // 4️ Get username using enrollId
+            const string usernameSql = @"
+            SELECT username
+            FROM tblusers_face
+            WHERE enrollid = @EnrollId";
+
+            string? username_enroll = await conn.ExecuteScalarAsync<string?>(usernameSql,new { EnrollId = enrollId });
+
+        }
+
+        
+
+        /*
         // 3. Log Attendance
         public async Task LogAttendanceAsync(int? enrollId, string deviceSn, DateTime time, double? distance)
         {
@@ -66,6 +110,7 @@ namespace CloudDemoNet8
 
             await conn.ExecuteAsync(sql, new { Id = enrollId, Sn = deviceSn, Time = time });
         }
+        */
 
         // 4. Set User Active Status
         public async Task SetUserActiveAsync(int enrollId, bool isActive)
@@ -76,7 +121,7 @@ namespace CloudDemoNet8
                 new { Active = isActive ? 1 : 0, Id = enrollId });
         }
 
-        // 5. Delete User (FULL DELETE — OLD PROJECT PARITY)
+        // 5. Delete User (FULL DELETE )
         // OLD behavior removed ALL backupnums (face, fp, card, pwd, etc.)
         public async Task DeleteUserAsync(int enrollId)
         {

@@ -305,14 +305,14 @@ namespace Syntery.AdminClient
 
             int enrollId;
 
-            // 1️⃣ Numeric → direct
+            // 1️ Numeric → direct
             if (int.TryParse(input, out enrollId))
             {
                 // continue
             }
             else
             {
-                // 2️⃣ Name search → wait for selection
+                // 2️ Name search → wait for selection
                 _searchTcs = new TaskCompletionSource<int>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -327,14 +327,14 @@ namespace Syntery.AdminClient
                     return;
             }
 
-            // 3️⃣ Command-specific extra input
+            // 3️ Command-specific extra input
             JObject payload = new JObject
             {
                 ["cmd"] = nextCommand,
                 ["enrollId"] = enrollId
             };
 
-            // SPECIAL CASE: Set Active
+            // Set Active
             if (nextCommand == "admin_set_active")
             {
                 bool active = AnsiConsole.Confirm("Set user as active?");
@@ -353,7 +353,7 @@ namespace Syntery.AdminClient
                 }
             }
 
-            // 4️⃣ Send final command
+            // 4️ Send final command
             Send(payload);
 
             EnqueueUiMessage("[green]Command sent[/]");
@@ -440,15 +440,40 @@ namespace Syntery.AdminClient
 
             bool isAdmin = AnsiConsole.Confirm("Is Admin?");
 
-            Send(new JObject
+            var enrollInput = AnsiConsole.Prompt(new TextPrompt<string>("Enter [green]Enroll ID[/] ([grey]press Enter for auto[/]):").AllowEmpty());
+
+            int? enrollId = null;
+
+            if (!string.IsNullOrWhiteSpace(enrollInput))
+            {
+                if (!int.TryParse(enrollInput, out var parsed) || parsed <= 0)
+                {
+                    EnqueueUiMessage("[red]Invalid Enroll ID[/]");
+                    return;
+                }
+
+                enrollId = parsed;
+            }
+
+
+            var payload = new JObject
             {
                 ["cmd"] = "admin_add_user",
                 ["deviceSn"] = sn,
                 ["name"] = name,
                 ["isAdmin"] = isAdmin ? 1 : 0
-            });
+            };
+
+            // ONLY include enrollId if user typed one
+            if (enrollId.HasValue)
+            {
+                payload["enrollId"] = enrollId.Value;
+            }
+
+            Send(payload);
 
             EnqueueUiMessage("[green]Add user command sent[/]");
+
         }
         /*
         private static void HandleDeleteUser()
@@ -639,16 +664,6 @@ namespace Syntery.AdminClient
             AnsiConsole.Write(table);
         }
 
-        private static int PromptEnrollId()
-        {
-            return AnsiConsole.Prompt(
-                new TextPrompt<int>("Enter [green]Enroll ID[/] ([grey]0 to cancel[/]):")
-                    .Validate(id => id >= 0
-                        ? ValidationResult.Success()
-                        : ValidationResult.Error("[red]Invalid ID[/]"))
-            );
-        }
-
         private static void RequestDeviceList()
         {
             Send(new JObject { ["cmd"] = "admin_list_devices" });
@@ -693,22 +708,8 @@ namespace Syntery.AdminClient
                     AnsiConsole.MarkupLine(_uiMessages.Dequeue());
             }
         }
-        /*
-        private static void StartAdminPing()
-        {
-            _pingTimer = new Timer(_ =>
-            {
-                if (!IsServerConnected())
-                    return;
 
-                Send(new JObject
-                {
-                    ["cmd"] = "admin_ping"
-                });
-
-            }, null, TimeSpan.Zero, TimeSpan.FromSeconds(30));
-        }
-        */
+      
         // ---------------- Live Scan UI ----------------
         private static void ShowLiveScanTree(JObject j)
         {

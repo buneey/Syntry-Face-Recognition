@@ -479,7 +479,4 @@ public static class FaceMatch
         }
         catch { return new Mat(); }
     }
-
-    // dummy base64 for warm-up (1x1 pixel)
-    private static string EncodeDummy() => Convert.ToBase64String(new byte[] { 255, 216, 255, 217 });
 }

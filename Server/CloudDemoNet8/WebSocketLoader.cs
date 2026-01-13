@@ -327,7 +327,7 @@ namespace CloudDemoNet8
 
             if (!string.IsNullOrEmpty(sn))
             {
-                // 🔴 Deduplicate device sessions by SN
+                // Deduplicate device sessions by SN
                 if (_deviceToSession.TryGetValue(sn, out var oldSessionId))
                 {
                     if (_sessions.TryGetValue(oldSessionId, out var oldSession))
@@ -517,7 +517,6 @@ namespace CloudDemoNet8
                             ? null
                             : JObject.FromObject(FaceMatch.LastLivenessResult)
                     });
-
 
                     var live = FaceMatch.LastLivenessResult;
 
@@ -727,8 +726,10 @@ namespace CloudDemoNet8
             string sn = j.Value<string>("deviceSn") ?? "";
             string name = j.Value<string>("name") ?? "";
             int isAdmin = j.Value<int?>("isAdmin") ?? 0;
+            int? requestedEnrollId = j.Value<int?>("enrollId");
 
-            Log.Information("[ADMIN_ADD] deviceSn='{SN}', name='{Name}', isAdmin={Admin}", sn, name, isAdmin);
+            Log.Information("[ADMIN_ADD] deviceSn='{SN}', name='{Name}', isAdmin={Admin}, requestedEnrollId={EnrollId}",sn, name, isAdmin, requestedEnrollId);
+
 
             if (!IsDeviceConnected(sn))
             {
@@ -752,7 +753,42 @@ namespace CloudDemoNet8
                 return;
             }
 
-            int enrollId = await FaceMatch.GenerateNextEnrollIdAsync(Program.ConnectionString);
+            int enrollId;
+
+            if (requestedEnrollId.HasValue)
+            {
+                if (requestedEnrollId.Value <= 0)
+                {
+                    await SafeSendReplyAsync(
+                        s,
+                        "admin_add_user",
+                        false,
+                        new { error = "Invalid enrollId" }
+                    );
+                    return;
+                }
+
+                if (await _repo.HasFaceDataAsync(requestedEnrollId.Value))
+                {
+                    await SafeSendReplyAsync(
+                        s,
+                        "admin_add_user",
+                        false,
+                        new { error = $"EnrollId {requestedEnrollId.Value} already exists" }
+                    );
+                    return;
+                }
+
+                enrollId = requestedEnrollId.Value;
+            }
+
+            else
+            {
+                // AUTO enrollId
+                enrollId = await FaceMatch.GenerateNextEnrollIdAsync(
+                    Program.ConnectionString);
+            }
+
 
 
             bool ok = await StartFaceEnrollment(sn, enrollId, name, isAdmin);

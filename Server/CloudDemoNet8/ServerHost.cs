@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 
 
-//wd awad a
+
 namespace CloudDemoNet8
 {
     public class ServerHost : BackgroundService
