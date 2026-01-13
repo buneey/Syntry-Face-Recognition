@@ -257,7 +257,7 @@ namespace CloudDemoNet8
                 new { message = "Admin registered" }
             );
 
-            // 🔁 Replay SDK-style reg approval to ALL connected devices
+            // Replay SDK-style reg approval to ALL connected devices
             foreach (var sn in _deviceToSession.Keys)
             {
                 var dev = GetSessionByID(sn);
@@ -279,8 +279,7 @@ namespace CloudDemoNet8
 
 
 
-        private static async Task HandleAdminSearchUserByName(
-    WebSocketSession s, JObject j)
+        private static async Task HandleAdminSearchUserByName(WebSocketSession s, JObject j)
         {
             string name = j.Value<string>("name")?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(name))
@@ -307,12 +306,6 @@ namespace CloudDemoNet8
                 new { users = arr }
             );
         }
-
-
-
-
-
-
 
         private static async Task HandleRegister(WebSocketSession s, JObject j)
         {
@@ -357,9 +350,6 @@ namespace CloudDemoNet8
             // Log.Information("[DEVICE] SN={SN} mapped to Session={SID}",sn,s.SessionID); //DEBUG
 
         }
-
-
-
 
         private static async Task HandleSendUser(WebSocketSession s, JObject j)
         {

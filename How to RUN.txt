@@ -1,0 +1,17 @@
+MAKE SURE THE DEVICE SETTINGS ARE THE SAME AS TESTING SETTINGS
+
+RUN THE SERVER
+- Install .Net8 and Windows 11
+- Open "appsettings" in the Server Folder using Notepad
+- Make sure your connection string matches your database and tables
+- Open "Server_Start_7790 - dll" in the Server in Notepad
+- Replace the path with the path of CloudDemoNet8 in your system.
+- RUN Server_Start_7790 - dll
+
+RUN THE CLIENT
+- Open "appsettings_client" in the Client Folder using Notepad
+- Replace the Server IP with the IP of the system running the server
+- RUN "Client_Start - dll"
+
+
+IF THERE IS ISSUES with the -dll files, Please follow the instructions on the console. 

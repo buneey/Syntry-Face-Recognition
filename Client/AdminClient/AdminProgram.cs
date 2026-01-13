@@ -127,7 +127,7 @@ namespace Syntery.AdminClient
 
                 }
 
-                // 🔥 FORCE FIRST RTT IMMEDIATELY
+                // FORCE FIRST RTT IMMEDIATELY
                 _lastPingTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 Send(new JObject
                 {
@@ -334,7 +334,7 @@ namespace Syntery.AdminClient
                 ["enrollId"] = enrollId
             };
 
-            // 🔑 SPECIAL CASE: Set Active
+            // SPECIAL CASE: Set Active
             if (nextCommand == "admin_set_active")
             {
                 bool active = AnsiConsole.Confirm("Set user as active?");
@@ -560,7 +560,7 @@ namespace Syntery.AdminClient
 
                         _lastRttMs = now - sentTs;
 
-                        // 🔥 Update quality HERE
+                        // Update quality HERE
                         if (_lastRttMs <= 50)
                             _connQuality = ConnectionQuality.Low;
                         else if (_lastRttMs <= 150)
