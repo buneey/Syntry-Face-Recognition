@@ -14,7 +14,6 @@
           "Microsoft.Extensions.Logging.Console": "9.0.10",
           "Newtonsoft.Json": "13.0.4",
           "OpenCvSharp4": "4.11.0.20250507",
-          "OpenCvSharp4.official.runtime.linux-x64": "4.11.0.20250507",
           "Serilog": "4.3.0",
           "Serilog.Extensions.Hosting": "10.0.0",
           "Serilog.Extensions.Logging": "10.0.0",
@@ -709,15 +708,6 @@
           "lib/net6.0/OpenCvSharp.dll": {
             "assemblyVersion": "1.0.0.0",
             "fileVersion": "1.0.0.0"
-          }
-        }
-      },
-      "OpenCvSharp4.official.runtime.linux-x64/4.11.0.20250507": {
-        "runtimeTargets": {
-          "runtimes/linux-x64/native/libOpenCvSharpExtern.so": {
-            "rid": "linux-x64",
-            "assetType": "native",
-            "fileVersion": "0.0.0.0"
           }
         }
       },
@@ -1517,13 +1507,6 @@
       "sha512": "sha512-j/R+G6xGC5IV2wGRU0/GF5qG/FrP+Uxp8dmNnXFlIdiw8Gfo4mtvKcBOBfS/bn4pP/7FNHLFX/xvMtgPJeDjAA==",
       "path": "opencvsharp4/4.11.0.20250507",
       "hashPath": "opencvsharp4.4.11.0.20250507.nupkg.sha512"
-    },
-    "OpenCvSharp4.official.runtime.linux-x64/4.11.0.20250507": {
-      "type": "package",
-      "serviceable": true,
-      "sha512": "sha512-wDyOxoVLH2OuUbcEaqXSCl1MxN+qw2eAieLIZ6jRi69yWBWUfYiyXSdIkv/bg9z9HhuhIRDIRi0qJBVlJvK9/w==",
-      "path": "opencvsharp4.official.runtime.linux-x64/4.11.0.20250507",
-      "hashPath": "opencvsharp4.official.runtime.linux-x64.4.11.0.20250507.nupkg.sha512"
     },
     "runtime.native.System.Data.SqlClient.sni/4.4.0": {
       "type": "package",
