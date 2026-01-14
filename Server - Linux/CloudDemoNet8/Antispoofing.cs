@@ -1,24 +1,22 @@
 ﻿using System;
-using System.Drawing;
 using System.IO;
 using System.Linq;
-using Emgu.CV;
-using Emgu.CV.CvEnum;
-using Emgu.CV.Dnn;
-using Emgu.CV.Structure;
-using Emgu.CV.Util;
-using CloudDemoNet8;
+using OpenCvSharp;
+using OpenCvSharp.Dnn;
 using Serilog;
 
 public static class AntiSpoofing
 {
     private static readonly object _netLock = new();
-    private static Net _net;
+    private static Net? _net;
     private static bool _isLoaded = false;
-    
-    // MiniFASNet expects 112x112 input
-    private const int InputSize = 112; //112
 
+    // MiniFASNet expects 112x112
+    private const int InputSize = 112;
+
+    // =========================
+    // INIT
+    // =========================
     public static void Init(string modelPath)
     {
         if (!File.Exists(modelPath))
@@ -26,36 +24,43 @@ public static class AntiSpoofing
 
         try
         {
-            _net = DnnInvoke.ReadNet(modelPath);
+            _net = CvDnn.ReadNetFromOnnx(modelPath);
+            _net.SetPreferableBackend(Backend.OPENCV);
+            _net.SetPreferableTarget(Target.CPU);
+
             _isLoaded = true;
-            Log.Debug($"[LIVENESS] Model loaded: {Path.GetFileName(modelPath)}");
+            Log.Information("[LIVENESS] Model loaded: {Model}", Path.GetFileName(modelPath));
         }
         catch (Exception ex)
         {
-            Log.Debug($"[LIVENESS] Failed to load model: {ex.Message}");
+            Log.Error(ex, "[LIVENESS] Failed to load model");
         }
     }
 
-    public static float Predict(Mat originalImage, Rectangle faceBox)
+    // =========================
+    // PREDICT
+    // =========================
+    public static float Predict(Mat image, Rect faceRect)
     {
-        if (!_isLoaded) return 0.0f; // Fail safe
+        if (!_isLoaded || _net == null)
+            return 0.0f; // fail-safe
 
         lock (_netLock)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                // 1. Crop with Scale 2.7x (Model needs background context to spot fakes)
-                using var cropped = CropWithScale(originalImage, faceBox, 2.7f); //4
-                if (cropped.IsEmpty) return 0.0f;
+                // 1. Crop with scale (background context)
+                using var cropped = CropWithScale(image, faceRect, 2.7f);
+                if (cropped.Empty())
+                    return 0.0f;
 
-                // 2. Preprocess (112x112, RGB, 0-1 range)
-                using var blob = DnnInvoke.BlobFromImage(
+                // 2. Preprocess (112x112, RGB, 0–1)
+                using var blob = CvDnn.BlobFromImage(
                     cropped,
-                    1.0 / 255.0,       // Scale
+                    1.0 / 255.0,
                     new Size(InputSize, InputSize),
-                    new MCvScalar(0, 0, 0),
-                    swapRB: true,      // BGR to RGB
+                    new Scalar(0, 0, 0),
+                    swapRB: true,
                     crop: false
                 );
 
@@ -63,66 +68,63 @@ public static class AntiSpoofing
                 _net.SetInput(blob);
                 using var output = _net.Forward();
 
+                // 4. Extract raw scores
+                output.GetArray<float>(out var scores);
 
-                sw.Stop();
-                //Log.Information($"[PERF][LIVENESS] {sw.ElapsedMilliseconds} ms");
+                var probs = Softmax(scores);
 
-                // 4. Get Score (Index 1 is Real, Index 0 is Spoof)
-                float[] scores = new float[output.SizeOfDimension[1]];
-                output.CopyTo(scores);
-
-                float[] probs = Softmax(scores);
-
-                // DEBUG: log everything
-                /*
-                Log.Information(
-                    "[LIVENESS RAW] scores = " +
-                    string.Join(", ", scores.Select(s => s.ToString("F3"))) +
-                    " | probs = " +
-                    string.Join(", ", probs.Select(p => p.ToString("F3")))
-                );
-                */
-                return probs[1]; // Return "Real" probability
+                // Index 1 = "Real", Index 0 = "Spoof"
+                return probs.Length > 1 ? probs[1] : 0.0f;
             }
             catch (Exception ex)
             {
-                Log.Error("[LIVENESS] Error during liveness prediction", ex);
+                Log.Error(ex, "[LIVENESS] Error during prediction");
                 return 0.0f;
             }
         }
     }
 
-    private static Mat CropWithScale(Mat img, Rectangle face, float scale)
+    // =========================
+    // HELPERS
+    // =========================
+    private static Mat CropWithScale(Mat img, Rect face, float scale)
     {
         int centerX = face.X + face.Width / 2;
         int centerY = face.Y + face.Height / 2;
+
         int newW = (int)(face.Width * scale);
         int newH = (int)(face.Height * scale);
 
         int x = centerX - newW / 2;
         int y = centerY - newH / 2;
 
-        // Clamp to image borders
         x = Math.Max(0, x);
         y = Math.Max(0, y);
+
         newW = Math.Min(newW, img.Width - x);
         newH = Math.Min(newH, img.Height - y);
 
-        if (newW <= 0 || newH <= 0) return new Mat();
-        return new Mat(img, new Rectangle(x, y, newW, newH));
+        if (newW <= 0 || newH <= 0)
+            return new Mat();
+
+        return new Mat(img, new Rect(x, y, newW, newH));
     }
 
     private static float[] Softmax(float[] input)
     {
-        float[] output = new float[input.Length];
         float max = input.Max();
-        float sum = 0.0f;
+        float sum = 0f;
+
+        var output = new float[input.Length];
         for (int i = 0; i < input.Length; i++)
         {
             output[i] = (float)Math.Exp(input[i] - max);
             sum += output[i];
         }
-        for (int i = 0; i < input.Length; i++) output[i] /= sum;
+
+        for (int i = 0; i < output.Length; i++)
+            output[i] /= sum;
+
         return output;
     }
 }
