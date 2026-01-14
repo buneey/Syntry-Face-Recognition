@@ -6,8 +6,6 @@ Recommended before large‑scale deployment:
 - Reduce verbose debug logging
  */
 
-using Emgu.CV.Dnn;
-using Emgu.CV.Features2D;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

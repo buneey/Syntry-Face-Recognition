@@ -1,17 +1,16 @@
 ﻿using CloudDemoNet8;
-using Emgu.CV;
-using Emgu.CV.CvEnum;
-using Emgu.CV.Structure;
 using Microsoft.Data.SqlClient;
+using OpenCvSharp;
+using OpenCvSharp.Dnn;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 
 public static class FaceMatch
 {
     // -------------------------- User Info in RAM -------------------------- //
+    private static readonly SemaphoreSlim _syncLock = new(1, 1);
 
     public class UserInfo
     {
@@ -21,30 +20,23 @@ public static class FaceMatch
         public bool IsActive { get; set; }
     }
 
-    // Protects the AI
     private static readonly object _aiLock = new();
-
-    // Full user cache: enrollId -> UserInfo
     public static ConcurrentDictionary<int, UserInfo> Users = new();
 
-    // -------------------------- Tunables -------------------------- //
+    private const double MatchThreshold = 0.40;
 
-    private const double MatchThreshold = 0.40; // OLD value preserved
+    // -------------------------- OpenCV Models -------------------------- //
 
-    // -------------------------- AI Models -------------------------- //
+    private static Net? _detector;
+    private static Net? _recognizer;
 
-    private static FaceDetectorYN? _detector;
-    private static FaceRecognizerSF? _recognizer;
-
-    // In-Memory DB for embeddings
     private static List<float[]> _knownEmbeddings = new();
     private static List<int> _knownLabels = new();
 
     private static bool _isLoaded = false;
     private static readonly object _lock = new();
-    private static readonly string DebugBasePath = Path.Combine(AppContext.BaseDirectory, "DebugFaces");
 
-    // -------------------------- Enrollment ID Generation -------------------------- //
+    // -------------------------- Enrollment ID -------------------------- //
 
     public static async Task<int> GenerateNextEnrollIdAsync(string connStr)
     {
@@ -52,9 +44,8 @@ public static class FaceMatch
         await conn.OpenAsync();
 
         const string sql = @"
-        SELECT ISNULL(MAX(enrollid), 999) + 1
-        FROM tblusers_face WITH (UPDLOCK, HOLDLOCK);
-    ";
+            SELECT ISNULL(MAX(enrollid), 999) + 1
+            FROM tblusers_face WITH (UPDLOCK, HOLDLOCK);";
 
         using var cmd = new SqlCommand(sql, conn);
         return (int)await cmd.ExecuteScalarAsync();
@@ -70,14 +61,20 @@ public static class FaceMatch
         if (!File.Exists(detPath)) throw new FileNotFoundException(detPath);
         if (!File.Exists(recPath)) throw new FileNotFoundException(recPath);
 
-        _detector = new FaceDetectorYN(detPath, "", new Size(0, 0), 0.8f, 0.3f, 5000);
-        _recognizer = new FaceRecognizerSF(recPath, "", 0, 0);
+        _detector = CvDnn.ReadNetFromOnnx(detPath);
+        _recognizer = CvDnn.ReadNetFromOnnx(recPath);
+
+        _detector.SetPreferableBackend(Backend.OPENCV);
+        _detector.SetPreferableTarget(Target.CPU);
+        _recognizer.SetPreferableBackend(Backend.OPENCV);
+        _recognizer.SetPreferableTarget(Target.CPU);
 
         AntiSpoofing.Init(spoofPath);
         Log.Information("[FACE] Models loaded");
     }
 
     // -------------------------- Load Embeddings -------------------------- //
+
     private sealed class RawFaceRow
     {
         public int EnrollId { get; init; }
@@ -86,10 +83,7 @@ public static class FaceMatch
         public bool IsActive { get; init; }
     }
 
-    public static void LoadEmbeddings()
-    {
-        LoadEmbeddings(Program.ConnectionString);
-    }
+    public static void LoadEmbeddings() => LoadEmbeddings(Program.ConnectionString);
 
     public static void LoadEmbeddings(string connStr)
     {
@@ -103,40 +97,29 @@ public static class FaceMatch
         var tempLabels = new List<int>();
         var tempUsers = new ConcurrentDictionary<int, UserInfo>();
 
-        int totalUsers = 0;
-        int processed = 0;
-        int loaded = 0;
-
         List<RawFaceRow> rawRows = new();
+        int totalUsers = 0, processed = 0, loaded = 0;
 
-        // ============================
-        // PHASE 1: FAST DB LOAD (NO AI)
-        // ============================
         try
         {
             using var conn = new SqlConnection(connStr);
             conn.Open();
 
-            const string sqlCount =
-                "SELECT COUNT(*) FROM tblusers_face WHERE backupnum = 50 AND record IS NOT NULL";
-
-            using (var countCmd = new SqlCommand(sqlCount, conn))
+            using (var countCmd = new SqlCommand(
+                "SELECT COUNT(*) FROM tblusers_face WHERE backupnum = 50 AND record IS NOT NULL", conn))
                 totalUsers = (int)countCmd.ExecuteScalar();
 
-            Log.Information($"[FACE] Starting embedding refresh for {totalUsers} users...");
+            const string sql = @"
+                SELECT enrollid, username, record, isactive
+                FROM tblusers_face
+                WHERE backupnum = 50 AND record IS NOT NULL";
 
-            const string sqlFaces = @"
-        SELECT enrollid, username, record, isactive
-        FROM tblusers_face
-        WHERE backupnum = 50 AND record IS NOT NULL";
-
-            using var cmd = new SqlCommand(sqlFaces, conn) { CommandTimeout = 300 };
+            using var cmd = new SqlCommand(sql, conn);
             using var reader = cmd.ExecuteReader();
 
             while (reader.Read())
             {
-                if (!int.TryParse(reader["enrollid"]?.ToString(), out int id))
-                    continue;
+                if (!int.TryParse(reader["enrollid"]?.ToString(), out int id)) continue;
 
                 rawRows.Add(new RawFaceRow
                 {
@@ -149,31 +132,21 @@ public static class FaceMatch
         }
         catch (Exception ex)
         {
-            Log.Information($"[FACE] DB Error during Phase 1: {ex.Message}");
+            Log.Error(ex, "[FACE] DB Error");
             return;
         }
-
-        // ============================
-        // PHASE 2: HEAVY PROCESSING
-        // ============================
-        Log.Information($"[FACE] Processing {rawRows.Count} users (DB closed)...");
 
         foreach (var row in rawRows)
         {
             processed++;
 
-            using var rawMat = DecodeBase64ToMat(row.Base64);
-            if (rawMat.IsEmpty)
-                continue;
+            using var mat = DecodeBase64ToMat(row.Base64);
+            if (mat.Empty()) continue;
 
-            float[]? vector = GetFaceFeature(rawMat, null);
-            if (vector == null)
-            {
-                Log.Information($"[FACE] Skipped EnrollID {row.EnrollId} (no valid face)");
-                continue;
-            }
+            var vec = GetFaceFeature(mat, null);
+            if (vec == null) continue;
 
-            tempEmbeddings.Add(vector);
+            tempEmbeddings.Add(vec);
             tempLabels.Add(row.EnrollId);
             loaded++;
 
@@ -184,16 +157,8 @@ public static class FaceMatch
                 HasFace = true,
                 IsActive = row.IsActive
             };
-
-            if (processed % 100 == 0 || processed == rawRows.Count)
-            {
-                Log.Information($"[FACE] Loaded {processed}/{rawRows.Count} users into RAM (valid: {loaded}).");
-            }
         }
 
-        // ============================
-        // PHASE 3: ATOMIC SWAP
-        // ============================
         lock (_lock)
         {
             _knownEmbeddings = tempEmbeddings;
@@ -202,94 +167,196 @@ public static class FaceMatch
             _isLoaded = true;
         }
 
-        Log.Information($"[FACE] Refreshed {loaded}/{totalUsers} users in RAM (Zero-Downtime).");
+        Log.Information($"[FACE] Refreshed {loaded}/{totalUsers} users in RAM");
     }
 
+    // -------------------------- Matching -------------------------- //
 
-    // -------------------------- Sync by Comparison -------------------------- //
-    private static readonly SemaphoreSlim _syncLock = new(1, 1);
-
-    public static async Task SyncByComparisonAsync()
+    public static (bool FaceMatched, int label, double score) MatchFaceFromBase64(string probeBase64)
     {
-        if (!await _syncLock.WaitAsync(0))
-            return; // Prevent overlap
+        using var probeMat = DecodeBase64ToMat(probeBase64);
+        if (probeMat.Empty()) return (false, -1, 0);
 
-        try
+        var probeVec = GetFaceFeature(probeMat, null, true);
+        if (probeVec == null) return (false, -1, 0);
+
+        int bestId = -1;
+        double bestScore = 0;
+
+        lock (_lock)
         {
-            if (string.IsNullOrEmpty(Program.ConnectionString))
-                return;
-
-            // 1. LIGHT snapshot
-            var dbUsers = new Dictionary<int, bool>();
-
-            using (var conn = new SqlConnection(Program.ConnectionString))
+            for (int i = 0; i < _knownEmbeddings.Count; i++)
             {
-                await conn.OpenAsync();
-
-                const string sql = @"
-                SELECT enrollid, isactive
-                FROM tblusers_face
-                WHERE backupnum = 50 AND record IS NOT NULL";
-
-                using var cmd = new SqlCommand(sql, conn)
+                double s = Cosine(probeVec, _knownEmbeddings[i]);
+                if (s > bestScore)
                 {
-                    CommandTimeout = 60
+                    bestScore = s;
+                    bestId = _knownLabels[i];
+                }
+            }
+        }
+
+        return (bestScore > MatchThreshold, bestId, bestScore);
+    }
+
+    // -------------------------- Core AI -------------------------- //
+
+    public sealed class LivenessResult
+    {
+        public float Score { get; init; }
+        public float Prob { get; init; }
+        public long TimeMs { get; init; }
+    }
+
+    public static LivenessResult? LastLivenessResult { get; private set; }
+
+    private static float[]? GetFaceFeature(Mat input, string? dbg, bool checkLiveness = false)
+    {
+        if (_detector == null || _recognizer == null) return null;
+
+        lock (_aiLock)
+        {
+            using var blob = CvDnn.BlobFromImage(input, 1.0, new Size(320, 320));
+            _detector.SetInput(blob);
+            using var det = _detector.Forward();
+
+            if (det.Rows == 0) return null;
+
+            var r = new Rect(
+                (int)(det.At<float>(0, 0) * input.Width),
+                (int)(det.At<float>(0, 1) * input.Height),
+                (int)((det.At<float>(0, 2) - det.At<float>(0, 0)) * input.Width),
+                (int)((det.At<float>(0, 3) - det.At<float>(0, 1)) * input.Height)
+            );
+
+            if (checkLiveness)
+            {
+                var sw = Stopwatch.StartNew();
+                float live = AntiSpoofing.Predict(input, r);
+                sw.Stop();
+
+                LastLivenessResult = new LivenessResult
+                {
+                    Score = live,
+                    Prob = live,
+                    TimeMs = sw.ElapsedMilliseconds
                 };
 
-                using var reader = await cmd.ExecuteReaderAsync();
-
-                while (await reader.ReadAsync())
-                {
-                    int id = reader.GetInt32(0);
-                    bool active = reader.IsDBNull(1) || reader.GetInt32(1) == 1;
-                    dbUsers[id] = active;
-                }
+                if (live < 0.30f) return null;
             }
 
-            // 2. ADD or UPDATE
-            foreach (var kv in dbUsers)
-            {
-                int id = kv.Key;
-                bool dbActive = kv.Value;
+            using var face = new Mat(input, r);
+            Cv2.Resize(face, face, new Size(112, 112));
 
-                if (!FaceMatch.Users.TryGetValue(id, out var ramUser))
-                {
-                    await FetchAndAddSingleUserAsync(id);
-                    Log.Information("[SYNC] User {ID} added from DB", id);
-                }
-                else if (ramUser.IsActive != dbActive)
-                {
-                    ramUser.IsActive = dbActive;
-                    Log.Information("[SYNC] User {ID} active updated to {Active}", id, dbActive);
-                }
-            }
+            using var recBlob = CvDnn.BlobFromImage(face, 1.0 / 255);
+            _recognizer.SetInput(recBlob);
+            using var output = _recognizer.Forward();
 
-            // 3. REMOVE missing users
-            foreach (var ramId in FaceMatch.Users.Keys.ToList())
-            {
-                if (!dbUsers.ContainsKey(ramId))
-                {
-                    FaceMatch.RemoveUserFromMemory(ramId);
-                    Log.Information("[SYNC] User {ID} removed (DB truth)", ramId);
-                }
-            }
-        }
-        catch (SqlException ex) when (ex.Number == -2)
-        {
-            // Timeout — expected under load
-            Log.Debug("[SYNC] DB timeout — skipping this cycle");
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[SYNC] Sync failed");
-        }
-        finally
-        {
-            _syncLock.Release();
+            output.GetArray<float>(out var vector);
+            return Normalize(vector);
+
         }
     }
 
+    // -------------------------- Helpers -------------------------- //
 
+    private static double Cosine(float[] a, float[] b)
+    {
+        double dot = 0, ma = 0, mb = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            dot += a[i] * b[i];
+            ma += a[i] * a[i];
+            mb += b[i] * b[i];
+        }
+        return dot / (Math.Sqrt(ma) * Math.Sqrt(mb));
+    }
+
+    private static float[] Normalize(float[] v)
+    {
+        double n = 0;
+        foreach (var x in v) n += x * x;
+        n = Math.Sqrt(n);
+        for (int i = 0; i < v.Length; i++) v[i] /= (float)n;
+        return v;
+    }
+
+    private static Mat DecodeBase64ToMat(string b64)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(b64);
+            return Cv2.ImDecode(bytes, ImreadModes.Color);
+        }
+        catch
+        {
+            return new Mat();
+        }
+    }
+
+    // -------------------------- Memory -------------------------- //
+    public static void AddUserToMemory(
+    int id,
+    string base64Image,
+    string? name = null,
+    bool active = true)
+    {
+        if (!_isLoaded)
+            LoadEmbeddings();
+
+        using var mat = DecodeBase64ToMat(base64Image);
+        if (mat.Empty())
+            return;
+
+        var vec = GetFaceFeature(mat, null);
+        if (vec == null)
+            return;
+
+        lock (_lock)
+        {
+            int idx = _knownLabels.IndexOf(id);
+            if (idx >= 0)
+            {
+                _knownLabels.RemoveAt(idx);
+                _knownEmbeddings.RemoveAt(idx);
+            }
+
+            _knownLabels.Add(id);
+            _knownEmbeddings.Add(vec);
+        }
+
+        Users.AddOrUpdate(
+            id,
+            _ => new UserInfo
+            {
+                EnrollId = id,
+                UserName = name ?? "Unknown",
+                HasFace = true,
+                IsActive = active
+            },
+            (_, u) =>
+            {
+                u.UserName = name ?? u.UserName;
+                u.HasFace = true;
+                u.IsActive = active;
+                return u;
+            });
+    }
+
+    public static void RemoveUserFromMemory(int id)
+    {
+        lock (_lock)
+        {
+            int idx = _knownLabels.IndexOf(id);
+            if (idx >= 0)
+            {
+                _knownLabels.RemoveAt(idx);
+                _knownEmbeddings.RemoveAt(idx);
+            }
+        }
+
+        Users.TryRemove(id, out _);
+    }
     private static async Task FetchAndAddSingleUserAsync(int enrollId)
     {
         try
@@ -328,155 +395,86 @@ public static class FaceMatch
         }
     }
 
-
-
-    // -------------------------- Matching -------------------------- //
-
-    public static (bool FaceMatched, int label, double score) MatchFaceFromBase64(string probeBase64)
+    public static async Task SyncByComparisonAsync()
     {
-        using var probeMat = DecodeBase64ToMat(probeBase64);
-        if (probeMat.IsEmpty) return (false, -1, 0);
+        if (!await _syncLock.WaitAsync(0))
+            return; // Prevent overlap
 
-        float[]? probeVec = GetFaceFeature(probeMat, null, checkLiveness: true);
-        if (probeVec == null) return (false, -1, 0);
-
-        int bestId = -1;
-        double bestScore = 0;
-
-        lock (_lock)
+        try
         {
-            for (int i = 0; i < _knownEmbeddings.Count; i++)
+            if (string.IsNullOrEmpty(Program.ConnectionString))
+                return;
+
+            // 1. LIGHT snapshot from DB
+            var dbUsers = new Dictionary<int, bool>();
+
+            using (var conn = new SqlConnection(Program.ConnectionString))
             {
-                double s = Cosine(probeVec, _knownEmbeddings[i]);
-                if (s > bestScore)
+                await conn.OpenAsync();
+
+                const string sql = @"
+                SELECT enrollid, isactive
+                FROM tblusers_face
+                WHERE backupnum = 50 AND record IS NOT NULL";
+
+                using var cmd = new SqlCommand(sql, conn)
                 {
-                    bestScore = s;
-                    bestId = _knownLabels[i];
+                    CommandTimeout = 60
+                };
+
+                using var reader = await cmd.ExecuteReaderAsync();
+
+                while (await reader.ReadAsync())
+                {
+                    int id = reader.GetInt32(0);
+                    bool active = reader.IsDBNull(1) || reader.GetInt32(1) == 1;
+                    dbUsers[id] = active;
+                }
+            }
+
+            // 2. ADD or UPDATE users
+            foreach (var kv in dbUsers)
+            {
+                int id = kv.Key;
+                bool dbActive = kv.Value;
+
+                if (!Users.TryGetValue(id, out var ramUser))
+                {
+                    await FetchAndAddSingleUserAsync(id);
+                    Log.Information("[SYNC] User {ID} added from DB", id);
+                }
+                else if (ramUser.IsActive != dbActive)
+                {
+                    ramUser.IsActive = dbActive;
+                    Log.Information("[SYNC] User {ID} active updated to {Active}", id, dbActive);
+                }
+            }
+
+            // 3. REMOVE missing users
+            foreach (var ramId in Users.Keys.ToList())
+            {
+                if (!dbUsers.ContainsKey(ramId))
+                {
+                    RemoveUserFromMemory(ramId);
+                    Log.Information("[SYNC] User {ID} removed (DB truth)", ramId);
                 }
             }
         }
-
-        return (bestScore > MatchThreshold, bestId, bestScore);
-    }
-
-    // -------------------------- Core AI -------------------------- //
-    public sealed class LivenessResult
-    {
-        public float Score { get; init; }
-        public float Prob { get; init; }
-        public long TimeMs { get; init; }
-    }
-
-    public static LivenessResult? LastLivenessResult { get; private set; }
-    private static float[]? GetFaceFeature(Mat input, string? dbg, bool checkLiveness = false)
-    {
-        if (_detector == null || _recognizer == null) return null;
-
-        using var resized = new Mat();
-        CvInvoke.Resize(input, resized, new Size(0, 0), 1, 1);
-
-        lock (_aiLock)
+        catch (SqlException ex) when (ex.Number == -2)
         {
-            _detector.InputSize = resized.Size;
-            using var faces = new Mat();
-            _detector.Detect(resized, faces);
-            if (faces.Rows == 0) return null;
-
-            using var faceRow = faces.Row(0);
-            float[] d = new float[15];
-            faceRow.CopyTo(d);
-            var rect = new Rectangle((int)d[0], (int)d[1], (int)d[2], (int)d[3]);
-            // COMMENT OUT TO DISABLE LIVNESS - HAVE TO COMMENT OUT IN BOTH PROGRAMS
-            if (checkLiveness)
-            {
-                var sw = Stopwatch.StartNew();
-                float live = AntiSpoofing.Predict(resized, rect);
-                sw.Stop();
-
-                LastLivenessResult = new LivenessResult
-                {
-                    Score = live,
-                    Prob = live, // or separate if you expose both
-                    TimeMs = sw.ElapsedMilliseconds
-                };
-
-                if (live < 0.30f)
-                    return null;
-            }
-
-
-            using var aligned = new Mat();
-            _recognizer.AlignCrop(resized, faceRow, aligned);
-            using var feat = new Mat();
-            _recognizer.Feature(aligned, feat);
-
-            float[] vec = new float[128];
-            feat.CopyTo(vec);
-            return vec;
+            // Expected timeout under load
+            Log.Debug("[SYNC] DB timeout — skipping this cycle");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[SYNC] Sync failed");
+        }
+        finally
+        {
+            _syncLock.Release();
         }
     }
 
-    // -------------------------- RAM Operations -------------------------- //
 
-    public static void AddUserToMemory(int id, string b64, string? name = null, bool active = true)
-    {
-        if (!_isLoaded) LoadEmbeddings();
 
-        using var mat = DecodeBase64ToMat(b64);
-        if (mat.IsEmpty) return;
-
-        var vec = GetFaceFeature(mat, null);
-        if (vec == null) return;
-
-        lock (_lock)
-        {
-            int idx = _knownLabels.IndexOf(id);
-            if (idx >= 0)
-            {
-                _knownLabels.RemoveAt(idx);
-                _knownEmbeddings.RemoveAt(idx);
-            }
-            _knownLabels.Add(id);
-            _knownEmbeddings.Add(vec);
-        }
-
-        Users.AddOrUpdate(id,
-            _ => new UserInfo { EnrollId = id, UserName = name ?? "Unknown", HasFace = true, IsActive = active },
-            (_, u) => { u.UserName = name ?? u.UserName; u.HasFace = true; u.IsActive = active; return u; });
-    }
-
-    public static void RemoveUserFromMemory(int id)
-    {
-        lock (_lock)
-        {
-            int idx = _knownLabels.IndexOf(id);
-            if (idx >= 0)
-            {
-                _knownLabels.RemoveAt(idx);
-                _knownEmbeddings.RemoveAt(idx);
-            }
-        }
-        Users.TryRemove(id, out _);
-    }
-
-    // -------------------------- Helpers -------------------------- //
-
-    private static double Cosine(float[] a, float[] b)
-    {
-        double dot = 0, ma = 0, mb = 0;
-        for (int i = 0; i < a.Length; i++) { dot += a[i] * b[i]; ma += a[i] * a[i]; mb += b[i] * b[i]; }
-        return dot / (Math.Sqrt(ma) * Math.Sqrt(mb));
-    }
-
-    private static Mat DecodeBase64ToMat(string b64)
-    {
-        try
-        {
-            var bytes = Convert.FromBase64String(b64);
-            var m = new Mat();
-            CvInvoke.Imdecode(bytes, ImreadModes.AnyColor, m);
-            return m;
-        }
-        catch { return new Mat(); }
-    }
 }
