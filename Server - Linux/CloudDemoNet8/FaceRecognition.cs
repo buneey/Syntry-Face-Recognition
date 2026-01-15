@@ -6,6 +6,7 @@ using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Net.NetworkInformation;
 
 public static class FaceMatch
 {
@@ -210,6 +211,8 @@ public static class FaceMatch
 
     public static LivenessResult? LastLivenessResult { get; private set; }
 
+
+
     private static float[]? GetFaceFeature(Mat input, string? dbg, bool checkLiveness = false)
     {
         if (_detector == null || _recognizer == null) return null;
@@ -220,14 +223,33 @@ public static class FaceMatch
             _detector.SetInput(blob);
             using var det = _detector.Forward();
 
-            if (det.Rows == 0) return null;
+            // Expect rows: [x, y, w, h, score, ...]
+            if (det.Rows == 0)
+                return null;
 
-            int x = (int)(det.At<float>(0, 0) * input.Width);
-            int y = (int)(det.At<float>(0, 1) * input.Height);
-            int w = (int)((det.At<float>(0, 2) - det.At<float>(0, 0)) * input.Width);
-            int h = (int)((det.At<float>(0, 3) - det.At<float>(0, 1)) * input.Height);
+            // take the highest score face
+            int bestRow = 0;
+            float bestScore = 0f;
 
-            // ✅ CLAMP TO IMAGE
+            for (int i = 0; i < det.Rows; i++)
+            {
+                float score = det.At<float>(i, 4);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestRow = i;
+                }
+            }
+
+            if (bestScore < 0.6f)
+                return null;
+
+            int x = (int)det.At<float>(bestRow, 0);
+            int y = (int)det.At<float>(bestRow, 1);
+            int w = (int)det.At<float>(bestRow, 2);
+            int h = (int)det.At<float>(bestRow, 3);
+
+            // clamp
             x = Math.Max(0, x);
             y = Math.Max(0, y);
             w = Math.Min(w, input.Width - x);
@@ -247,9 +269,16 @@ public static class FaceMatch
             using var face = new Mat(input, r);
             Cv2.Resize(face, face, new Size(112, 112));
 
-            using var recBlob = CvDnn.BlobFromImage(face, 1.0 / 255);
-            _recognizer.SetInput(recBlob);
+            using var recBlob = CvDnn.BlobFromImage(
+                face,
+                1.0 / 255.0,
+                new Size(112, 112),
+                new Scalar(0, 0, 0),
+                swapRB: true,
+                crop: false
+            );
 
+            _recognizer.SetInput(recBlob);
             using var output = _recognizer.Forward();
             output.GetArray<float>(out var vector);
 
@@ -273,14 +302,20 @@ public static class FaceMatch
 
     private static float[] Normalize(float[] v)
     {
-        double n = 0;
-        foreach (var x in v) n += x * x;
-        n = Math.Sqrt(n);
-        for (int i = 0; i < v.Length; i++) v[i] /= (float)n;
+        float norm = 0f;
+        for (int i = 0; i < v.Length; i++)
+            norm += v[i] * v[i];
+
+        norm = (float)Math.Sqrt(norm);
+        if (norm < 1e-6f) return v;
+
+        for (int i = 0; i < v.Length; i++)
+            v[i] /= norm;
+
         return v;
     }
 
-    private static Mat DecodeBase64ToMat(string b64)
+    public static Mat DecodeBase64ToMat(string b64)
     {
         try
         {
