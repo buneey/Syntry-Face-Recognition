@@ -258,6 +258,13 @@ public static class FaceMatch
                 det.Size(3)
             );
 
+            Log.Warning(
+    "[FACE][DETECT] Raw output: Dims={Dims}, Shape={Shape}",
+    det.Dims,
+    string.Join("x", Enumerable.Range(0, det.Dims).Select(i => det.Size(i)))
+);
+
+
             // Expecting [1,1,N,7]
             if (det.Dims != 4 || det.Size(3) != 7)
             {
