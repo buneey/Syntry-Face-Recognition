@@ -19,6 +19,7 @@ using SuperSocket.Server.Host;
 using SuperSocket.WebSocket.Server;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Runtime.InteropServices;
 using static CloudDemoNet8.Program;
 
 namespace CloudDemoNet8
@@ -393,6 +394,9 @@ namespace CloudDemoNet8
                 string note = r["note"]?["msg"]?.ToString() ?? "";
                 string img = r.Value<string>("image") ?? "";
 
+                // ───────────────────────────────
+                // 1️⃣ DROP OLD LOGS
+                // ───────────────────────────────
                 if (DateTime.TryParse(time, out var t) && (DateTime.Now - t).TotalSeconds > 10)
                 {
                     await SafeSendReplyAsync(s, "sendlog", true);
@@ -400,6 +404,9 @@ namespace CloudDemoNet8
                     continue;
                 }
 
+                // ───────────────────────────────
+                // 2️⃣ IGNORE SYSTEM / EMPTY EVENTS
+                // ───────────────────────────────
                 if (enroll == 0 || note.Contains("system boot", StringComparison.OrdinalIgnoreCase))
                 {
                     await SafeSendReplyAsync(s, "sendlog", true);
@@ -408,11 +415,14 @@ namespace CloudDemoNet8
 
                 if (note.Contains("fp verify fail", StringComparison.OrdinalIgnoreCase))
                 {
-                    await SafeSendReplyAsync(s, "sendlog", true, new { access = 0, message = "Fingerprint Unavailable" });
-
+                    await SafeSendReplyAsync(s, "sendlog", true,
+                        new { access = 0, message = "Fingerprint Unavailable" });
                     continue;
                 }
 
+                // ───────────────────────────────
+                // 3️⃣ ENROLLMENT MODE
+                // ───────────────────────────────
                 if (_pendingEnrollmentsBySn.TryGetValue(sn, out var p))
                 {
                     // 1. Timeout guard
@@ -424,9 +434,9 @@ namespace CloudDemoNet8
                             "[ENROLL] Timeout | EnrollID={EnrollId} | Device={SN}",
                             p.EnrollId, sn
                         );
+
                         await SendCommandAsync(s, "cleanuser");
                         await SendCommandAsync(s, "cleanlog");
-
                         await SafeSendReplyAsync(s, "sendlog", true);
                         continue;
                     }
@@ -435,14 +445,18 @@ namespace CloudDemoNet8
                     if (string.IsNullOrEmpty(img))
                         continue;
 
-                    // 3. Persist face shot
-                    await _repo.UpsertUserAsync(
-                        p.EnrollId,
-                        p.UserName,
-                        50,
-                        p.IsAdmin,
-                        img
-                    );
+                    // 3. Save face image (FaceMatch handles vectors)
+                    var mat = FaceMatch.DecodeBase64ToMat(img);
+                    if (!mat.Empty())
+                    {
+                        await _repo.UpsertUserAsync(
+                            p.EnrollId,
+                            p.UserName,
+                            50,
+                            p.IsAdmin,
+                            img
+                        );
+                    }
 
                     p.ShotsRemaining--;
 
@@ -459,24 +473,20 @@ namespace CloudDemoNet8
 
                         await ReplyAccess(s, 0, "Enrollment Complete");
 
-                        if (_adminSessions != null && !_adminSessions.IsEmpty)
+                        foreach (var admin in _adminSessions.Values)
                         {
-                            foreach (var admin in _adminSessions.Values)
-                            {
-                                await SafeSendReplyAsync(
-                                    admin,
-                                    "admin_enroll_complete",
-                                    true,
-                                    new
-                                    {
-                                        enrollId = p.EnrollId,
-                                        username = p.UserName,
-                                        deviceSn = sn
-                                    }
-                                );
-                            }
+                            await SafeSendReplyAsync(
+                                admin,
+                                "admin_enroll_complete",
+                                true,
+                                new
+                                {
+                                    enrollId = p.EnrollId,
+                                    username = p.UserName,
+                                    deviceSn = sn
+                                }
+                            );
                         }
-
                     }
                     else
                     {
@@ -487,80 +497,58 @@ namespace CloudDemoNet8
                 }
 
 
-                if (note.Contains("face not found", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(img))
+                // ───────────────────────────────
+                // 4️⃣ FACE RECOGNITION (ALWAYS IF IMAGE EXISTS)
+                // ───────────────────────────────
+                if (!string.IsNullOrEmpty(img))
                 {
-
-                    var (m, id, d) = FaceMatch.MatchFaceFromBase64(img);
-
+                    var (matched, id, dist) = FaceMatch.MatchFaceFromBase64(img);
                     FaceMatch.Users.TryGetValue(id, out var user);
 
                     await BroadcastToAdminsAsync(new JObject
                     {
                         ["ret"] = "live_scan",
-
                         ["deviceSn"] = sn,
                         ["deviceIp"] = s.RemoteEndPoint?.ToString(),
                         ["time"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-
-                        ["matched"] = m,
-                        ["matchScore"] = d,
-
+                        ["matched"] = matched,
+                        ["matchScore"] = dist,
                         ["enrollId"] = id,
                         ["userName"] = user?.UserName ?? "Unknown",
                         ["isActive"] = user?.IsActive ?? false,
                         ["hasFace"] = user?.HasFace ?? false,
-
-
                         ["liveness"] = FaceMatch.LastLivenessResult == null
                             ? null
                             : JObject.FromObject(FaceMatch.LastLivenessResult)
                     });
 
-                    var live = FaceMatch.LastLivenessResult;
-
-                    if (m && FaceMatch.Users.TryGetValue(id, out var u))
+                    if (matched && user != null)
                     {
-                        if (u.IsActive)
+                        if (user.IsActive)
                         {
-                            // ACTIVE
-                            await ReplyAccess(s, 1, $"Welcome {u.UserName}");
-                            _ = _repo.LogAttendanceAsync(id, sn, DateTime.Now, d);
-
-
+                            await ReplyAccess(s, 1, $"Welcome {user.UserName}");
+                            _ = _repo.LogAttendanceAsync(id, sn, DateTime.Now, dist);
                         }
                         else
                         {
-                            // INACTIVE
-                            await ReplyAccess(s, 0, $"User inactive: {u.UserName}");
-
+                            await ReplyAccess(s, 0, $"User inactive: {user.UserName}");
                         }
                     }
                     else
                     {
-                        // ❓ NOT FOUND
                         await ReplyAccess(s, 0, "User not found");
 
-                        if (!string.IsNullOrEmpty(img))
-                        {
-                            var preview = img.Length > 200
-                                ? img.Substring(0, 200) + "..."
-                                : img;
-
-                            Log.Warning(
-                                "[FACE][NOT FOUND] Device={SN} EnrollID={EnrollId} ImageLength={Len}\nBase64Preview={Preview}",
-                                sn,
-                                id,
-                                img.Length,
-                                preview
-                            );
-                        }
+                        var preview = img.Length > 200 ? img[..200] + "..." : img;
+                        Log.Warning(
+                            "[FACE][NOT FOUND] Device={SN} EnrollID={EnrollId} ImageLength={Len}\nBase64Preview={Preview}",
+                            sn, id, img.Length, preview);
                     }
 
                     await CleanDeviceLogs(sn);
                 }
-
             }
         }
+
 
         // ---------------- HELPERS ----------------
         private static async Task BroadcastToAdminsAsync(JObject payload)
