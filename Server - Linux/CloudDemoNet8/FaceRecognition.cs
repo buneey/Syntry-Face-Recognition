@@ -237,7 +237,16 @@ public static class FaceMatch
 
         lock (_aiLock)
         {
-            using var blob = CvDnn.BlobFromImage(input, 1.0, new Size(320, 320));
+            using var blob = CvDnn.BlobFromImage(
+                input,
+                1.0,
+                new Size(320, 320),
+                new Scalar(0, 0, 0),
+                swapRB: true,
+                crop: false
+            );
+
+            _detector.SetInput(blob);   // ✅ THIS WAS MISSING
             using var det = _detector.Forward();
 
             Log.Debug(
