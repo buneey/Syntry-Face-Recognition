@@ -189,13 +189,31 @@ public static class FaceMatch
             for (int i = 0; i < _knownEmbeddings.Count; i++)
             {
                 double s = Cosine(probeVec, _knownEmbeddings[i]);
+
+                Log.Debug(
+                    "[FACE][MATCH] Compare EnrollID={ID} Score={Score:F4}",
+                    _knownLabels[i],
+                    s
+                );
+
                 if (s > bestScore)
                 {
                     bestScore = s;
                     bestId = _knownLabels[i];
                 }
+
+                Log.Information(
+                    "[FACE][MATCH] BestMatch EnrollID={ID} Score={Score:F4} Threshold={Th}",
+                    bestId,
+                    bestScore,
+                    MatchThreshold
+                );
+
+
             }
+
         }
+
 
         return (bestScore > MatchThreshold, bestId, bestScore);
     }
@@ -220,57 +238,116 @@ public static class FaceMatch
         lock (_aiLock)
         {
             using var blob = CvDnn.BlobFromImage(input, 1.0, new Size(320, 320));
-            _detector.SetInput(blob);
             using var det = _detector.Forward();
 
-            // Expect rows: [x, y, w, h, score, ...]
-            if (det.Rows == 0)
-                return null;
+            Log.Debug(
+                "[FACE][DETECT] Output dims={Dims}, sizes=[{S0},{S1},{S2},{S3}]",
+                det.Dims,
+                det.Size(0),
+                det.Size(1),
+                det.Size(2),
+                det.Size(3)
+            );
 
-            // take the highest score face
-            int bestRow = 0;
+            // Expecting [1,1,N,7]
+            if (det.Dims != 4 || det.Size(3) != 7)
+            {
+                Log.Warning("[FACE][DETECT] Unexpected detector output shape");
+                return null;
+            }
+
+            int detections = det.Size(2);
+            Log.Debug("[FACE][DETECT] Total detections={Count}", detections);
+
+            int best = -1;
             float bestScore = 0f;
 
-            for (int i = 0; i < det.Rows; i++)
+            for (int i = 0; i < detections; i++)
             {
-                float score = det.At<float>(i, 4);
+                float score = det.At<float>(0, 0, i, 2);
+                Log.Debug("[FACE][DETECT] Face#{Idx} score={Score:F3}", i, score);
+
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    bestRow = i;
+                    best = i;
                 }
             }
 
-            if (bestScore < 0.6f)
+            if (best < 0)
+            {
+                Log.Warning("[FACE][DETECT] No valid faces detected");
                 return null;
+            }
 
-            float x1 = det.At<float>(bestRow, 0) * input.Width;
-            float y1 = det.At<float>(bestRow, 1) * input.Height;
-            float x2 = det.At<float>(bestRow, 2) * input.Width;
-            float y2 = det.At<float>(bestRow, 3) * input.Height;
+            if (bestScore < 0.6f)
+            {
+                Log.Warning(
+                    "[FACE][DETECT] Best face rejected (score={Score:F3})",
+                    bestScore
+                );
+                return null;
+            }
 
-            int x = (int)Math.Clamp(x1, 0, input.Width - 1);
-            int y = (int)Math.Clamp(y1, 0, input.Height - 1);
-            int w = (int)Math.Clamp(x2 - x1, 1, input.Width - x);
-            int h = (int)Math.Clamp(y2 - y1, 1, input.Height - y);
+            float x1 = det.At<float>(0, 0, best, 3) * input.Width;
+            float y1 = det.At<float>(0, 0, best, 4) * input.Height;
+            float x2 = det.At<float>(0, 0, best, 5) * input.Width;
+            float y2 = det.At<float>(0, 0, best, 6) * input.Height;
 
+            int x = (int)x1;
+            int y = (int)y1;
+            int w = (int)(x2 - x1);
+            int h = (int)(y2 - y1);
 
-            // clamp
+            // Clamp
             x = Math.Max(0, x);
             y = Math.Max(0, y);
             w = Math.Min(w, input.Width - x);
             h = Math.Min(h, input.Height - y);
 
             if (w <= 0 || h <= 0)
+            {
+                Log.Warning(
+                    "[FACE][ROI] Invalid ROI x={X} y={Y} w={W} h={H}",
+                    x, y, w, h
+                );
                 return null;
+            }
 
             var r = new Rect(x, y, w, h);
 
+            Log.Debug(
+                "[FACE][ROI] Using ROI x={X} y={Y} w={W} h={H}",
+                x, y, w, h
+            );
+
+
             if (checkLiveness)
             {
+                var sw = Stopwatch.StartNew();
                 float live = AntiSpoofing.Predict(input, r);
-                if (live < 0.30f) return null;
+                sw.Stop();
+
+                LastLivenessResult = new LivenessResult
+                {
+                    Score = live,
+                    Prob = live,
+                    TimeMs = sw.ElapsedMilliseconds
+                };
+
+                Log.Debug(
+                    "[LIVENESS] Score={Score:F3} Time={Ms}ms",
+                    live,
+                    sw.ElapsedMilliseconds
+                );
+
+                if (live < 0.30f)
+                {
+                    Log.Warning("[LIVENESS] Rejected by liveness");
+                    return null;
+                }
             }
+
 
             using var face = new Mat(input, r);
             Cv2.Resize(face, face, new Size(112, 112));
@@ -287,6 +364,18 @@ public static class FaceMatch
             _recognizer.SetInput(recBlob);
             using var output = _recognizer.Forward();
             output.GetArray<float>(out var vector);
+
+            if (vector == null || vector.Length == 0)
+            {
+                Log.Warning("[FACE][EMBED] Empty embedding vector");
+                return null;
+            }
+
+            Log.Debug(
+                "[FACE][EMBED] Vector length={Len} FirstVal={Val:F4}",
+                vector.Length,
+                vector[0]
+            );
 
             return Normalize(vector);
         }
