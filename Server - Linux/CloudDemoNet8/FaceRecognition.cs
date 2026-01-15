@@ -24,7 +24,7 @@ public static class FaceMatch
     private static readonly object _aiLock = new();
     public static ConcurrentDictionary<int, UserInfo> Users = new();
 
-    private const double MatchThreshold = 0.40;
+    private const double MatchThreshold = 0.30;
 
     // -------------------------- OpenCV Models -------------------------- //
 
@@ -178,7 +178,7 @@ public static class FaceMatch
         using var probeMat = DecodeBase64ToMat(probeBase64);
         if (probeMat.Empty()) return (false, -1, 0);
 
-        var probeVec = GetFaceFeature(probeMat, null, true);
+        var probeVec = GetFaceFeature(probeMat, null, false);
         if (probeVec == null) return (false, -1, 0);
 
         int bestId = -1;
@@ -244,10 +244,16 @@ public static class FaceMatch
             if (bestScore < 0.6f)
                 return null;
 
-            int x = (int)det.At<float>(bestRow, 0);
-            int y = (int)det.At<float>(bestRow, 1);
-            int w = (int)det.At<float>(bestRow, 2);
-            int h = (int)det.At<float>(bestRow, 3);
+            float x1 = det.At<float>(bestRow, 0) * input.Width;
+            float y1 = det.At<float>(bestRow, 1) * input.Height;
+            float x2 = det.At<float>(bestRow, 2) * input.Width;
+            float y2 = det.At<float>(bestRow, 3) * input.Height;
+
+            int x = (int)Math.Clamp(x1, 0, input.Width - 1);
+            int y = (int)Math.Clamp(y1, 0, input.Height - 1);
+            int w = (int)Math.Clamp(x2 - x1, 1, input.Width - x);
+            int h = (int)Math.Clamp(y2 - y1, 1, input.Height - y);
+
 
             // clamp
             x = Math.Max(0, x);
