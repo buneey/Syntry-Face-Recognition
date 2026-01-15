@@ -447,15 +447,43 @@ namespace CloudDemoNet8
 
                     // 3. Save face image (FaceMatch handles vectors)
                     var mat = FaceMatch.DecodeBase64ToMat(img);
-                    if (!mat.Empty())
+
+                    if (mat.Empty())
                     {
-                        await _repo.UpsertUserAsync(
-                            p.EnrollId,
-                            p.UserName,
-                            50,
-                            p.IsAdmin,
-                            img
-                        );
+                        Log.Warning("[ENROLL] Empty image received");
+                    }
+                    else
+                    {
+                        var vec = FaceMatch.MatchFaceFromBase64(img);
+
+                        if (!vec.FaceMatched)
+                        {
+                            Log.Warning(
+                                "[ENROLL] Face extraction failed for EnrollID={ID}",
+                                p.EnrollId
+                            );
+                        }
+                        else
+                        {
+                            Log.Information(
+                                "[ENROLL] Face vector accepted for EnrollID={ID}",
+                                p.EnrollId
+                            );
+
+                            await _repo.UpsertUserAsync(
+                                p.EnrollId,
+                                p.UserName,
+                                50,
+                                p.IsAdmin,
+                                img
+                            );
+
+                            FaceMatch.AddUserToMemory(
+                                p.EnrollId,
+                                img,
+                                p.UserName
+                            );
+                        }
                     }
 
                     p.ShotsRemaining--;
