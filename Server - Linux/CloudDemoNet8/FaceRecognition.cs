@@ -222,26 +222,25 @@ public static class FaceMatch
 
             if (det.Rows == 0) return null;
 
-            var r = new Rect(
-                (int)(det.At<float>(0, 0) * input.Width),
-                (int)(det.At<float>(0, 1) * input.Height),
-                (int)((det.At<float>(0, 2) - det.At<float>(0, 0)) * input.Width),
-                (int)((det.At<float>(0, 3) - det.At<float>(0, 1)) * input.Height)
-            );
+            int x = (int)(det.At<float>(0, 0) * input.Width);
+            int y = (int)(det.At<float>(0, 1) * input.Height);
+            int w = (int)((det.At<float>(0, 2) - det.At<float>(0, 0)) * input.Width);
+            int h = (int)((det.At<float>(0, 3) - det.At<float>(0, 1)) * input.Height);
+
+            // ✅ CLAMP TO IMAGE
+            x = Math.Max(0, x);
+            y = Math.Max(0, y);
+            w = Math.Min(w, input.Width - x);
+            h = Math.Min(h, input.Height - y);
+
+            if (w <= 0 || h <= 0)
+                return null;
+
+            var r = new Rect(x, y, w, h);
 
             if (checkLiveness)
             {
-                var sw = Stopwatch.StartNew();
                 float live = AntiSpoofing.Predict(input, r);
-                sw.Stop();
-
-                LastLivenessResult = new LivenessResult
-                {
-                    Score = live,
-                    Prob = live,
-                    TimeMs = sw.ElapsedMilliseconds
-                };
-
                 if (live < 0.30f) return null;
             }
 
@@ -250,11 +249,11 @@ public static class FaceMatch
 
             using var recBlob = CvDnn.BlobFromImage(face, 1.0 / 255);
             _recognizer.SetInput(recBlob);
+
             using var output = _recognizer.Forward();
-
             output.GetArray<float>(out var vector);
-            return Normalize(vector);
 
+            return Normalize(vector);
         }
     }
 
