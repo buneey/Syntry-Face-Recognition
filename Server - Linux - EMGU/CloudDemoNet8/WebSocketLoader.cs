@@ -459,6 +459,10 @@ namespace CloudDemoNet8
                         );
 
                         await ReplyAccess(s, 0, "Enrollment Complete");
+                        Log.Information(
+                            "[ENROLL] Complete | EnrollID={EnrollId} | User={User} | Device={SN}",
+                            p.EnrollId, p.UserName, sn
+                        );
 
                         if (_adminSessions != null && !_adminSessions.IsEmpty)
                         {
