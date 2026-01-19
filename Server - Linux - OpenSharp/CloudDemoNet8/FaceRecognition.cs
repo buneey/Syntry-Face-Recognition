@@ -1,11 +1,12 @@
 ﻿using CloudDemoNet8;
+using Microsoft.Data.SqlClient;
 using OpenCvSharp;
 using OpenCvSharp.Dnn;
-using Microsoft.Data.SqlClient;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Reactive.Concurrency;
 
 public static class FaceMatch
 {
@@ -168,7 +169,85 @@ public static class FaceMatch
         }
     }
 
+    public static async Task SyncByComparisonAsync()
+    {
+        if (!await _syncLock.WaitAsync(0))
+            return; // Prevent overlap
 
+        try
+        {
+            if (string.IsNullOrEmpty(Program.ConnectionString))
+                return;
+
+            // 1. LIGHT snapshot
+            var dbUsers = new Dictionary<int, bool>();
+
+            using (var conn = new SqlConnection(Program.ConnectionString))
+            {
+                await conn.OpenAsync();
+
+                const string sql = @"
+                SELECT enrollid, isactive
+                FROM tblusers_face
+                WHERE backupnum = 50 AND record IS NOT NULL";
+
+                using var cmd = new SqlCommand(sql, conn)
+                {
+                    CommandTimeout = 60
+                };
+
+                using var reader = await cmd.ExecuteReaderAsync();
+
+                while (await reader.ReadAsync())
+                {
+                    int id = reader.GetInt32(0);
+                    bool active = reader.IsDBNull(1) || reader.GetInt32(1) == 1;
+                    dbUsers[id] = active;
+                }
+            }
+
+            // 2. ADD or UPDATE
+            foreach (var kv in dbUsers)
+            {
+                int id = kv.Key;
+                bool dbActive = kv.Value;
+
+                if (!FaceMatch.Users.TryGetValue(id, out var ramUser))
+                {
+                    await FetchAndAddSingleUserAsync(id);
+                    Log.Information("[SYNC] User {ID} added from DB", id);
+                }
+                else if (ramUser.IsActive != dbActive)
+                {
+                    ramUser.IsActive = dbActive;
+                    Log.Information("[SYNC] User {ID} active updated to {Active}", id, dbActive);
+                }
+            }
+
+            // 3. REMOVE missing users
+            foreach (var ramId in FaceMatch.Users.Keys.ToList())
+            {
+                if (!dbUsers.ContainsKey(ramId))
+                {
+                    FaceMatch.RemoveUserFromMemory(ramId);
+                    Log.Information("[SYNC] User {ID} removed (DB truth)", ramId);
+                }
+            }
+        }
+        catch (SqlException ex) when (ex.Number == -2)
+        {
+            // Timeout — expected under load
+            Log.Debug("[SYNC] DB timeout — skipping this cycle");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[SYNC] Sync failed");
+        }
+        finally
+        {
+            _syncLock.Release();
+        }
+    }
 
     // -------------------------- MATCH -------------------------- //
 
