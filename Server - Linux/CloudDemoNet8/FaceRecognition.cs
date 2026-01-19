@@ -1,8 +1,9 @@
 ﻿using CloudDemoNet8;
+using Microsoft.Data.SqlClient;
 using OpenCvSharp;
 using OpenCvSharp.Dnn;
-using Microsoft.Data.SqlClient;
 using Serilog;
+using Spectre.Console;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
@@ -54,6 +55,15 @@ public static class FaceMatch
 
         AntiSpoofing.Init(spoofPath);
         Log.Information("[FACE] DNN models loaded");
+
+        Log.Warning(
+                "Detector model: {Path}",
+                detPath
+            );
+        Log.Warning(
+                "Recognizer model: {Path}",
+                recPath
+            );
     }
 
     // -------------------------- CORE FEATURE -------------------------- //
@@ -65,6 +75,7 @@ public static class FaceMatch
 
         lock (_aiLock)
         {
+            
             const int YUNET_SIZE = 320;
 
             using var resized = new Mat();
