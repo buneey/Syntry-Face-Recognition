@@ -60,53 +60,68 @@ public static class FaceMatch
 
     private static float[]? GetFaceFeature(Mat input, string? dbg, bool checkLiveness = false)
     {
-        if (_detector == null || _recognizer == null) return null;
+        if (_detector == null || _recognizer == null)
+            return null;
 
         lock (_aiLock)
         {
-            using var blob = CvDnn.BlobFromImage(input, 1.0, new Size(320, 320));
-            _detector.SetInput(blob);
+            // ---------- YuNet expects original image size ----------
+            using var blob = CvDnn.BlobFromImage(
+                input,
+                1.0,
+                new Size(input.Width, input.Height),
+                new Scalar(),
+                swapRB: true,
+                crop: false
+            );
 
+            _detector.SetInput(blob);
             using var det = _detector.Forward();
 
-            // Expected: 1 x N x 10
+            // Expected shape: [1, N, 15]
             if (det.Dims != 3 || det.Size(2) < 6)
             {
-                Log.Warning("[FACE][DETECT] Unexpected detector output");
+                Log.Warning("[FACE][DETECT] Invalid YuNet output shape");
                 return null;
             }
 
-            float bestScore = 0;
-            Rect bestRect = default;
+            int bestIdx = -1;
+            float bestScore = 0f;
 
-            for (int i = 0; i < det.Size(1); i++)
+            int count = det.Size(1);
+
+            for (int i = 0; i < count; i++)
             {
                 float score = det.At<float>(0, i, 4);
-                if (score < 0.6f) continue;
-
-                int x = (int)(det.At<float>(0, i, 0) * input.Width);
-                int y = (int)(det.At<float>(0, i, 1) * input.Height);
-                int w = (int)((det.At<float>(0, i, 2) - det.At<float>(0, i, 0)) * input.Width);
-                int h = (int)((det.At<float>(0, i, 3) - det.At<float>(0, i, 1)) * input.Height);
-
-                x = Math.Clamp(x, 0, input.Width - 1);
-                y = Math.Clamp(y, 0, input.Height - 1);
-                w = Math.Clamp(w, 1, input.Width - x);
-                h = Math.Clamp(h, 1, input.Height - y);
-
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    bestRect = new Rect(x, y, w, h);
+                    bestIdx = i;
                 }
             }
 
-            if (bestScore == 0) return null;
+            if (bestIdx < 0 || bestScore < 0.6f)
+                return null;
 
+            // YuNet format: x, y, w, h (ABSOLUTE PIXELS)
+            int x = (int)det.At<float>(0, bestIdx, 0);
+            int y = (int)det.At<float>(0, bestIdx, 1);
+            int w = (int)det.At<float>(0, bestIdx, 2);
+            int h = (int)det.At<float>(0, bestIdx, 3);
+
+            // Clamp ROI
+            x = Math.Clamp(x, 0, input.Width - 1);
+            y = Math.Clamp(y, 0, input.Height - 1);
+            w = Math.Clamp(w, 1, input.Width - x);
+            h = Math.Clamp(h, 1, input.Height - y);
+
+            var rect = new Rect(x, y, w, h);
+
+            // ---------- LIVENESS ----------
             if (checkLiveness)
             {
                 var sw = Stopwatch.StartNew();
-                float live = AntiSpoofing.Predict(input, bestRect);
+                float live = AntiSpoofing.Predict(input, rect);
                 sw.Stop();
 
                 LastLivenessResult = new LivenessResult
@@ -116,22 +131,33 @@ public static class FaceMatch
                     TimeMs = sw.ElapsedMilliseconds
                 };
 
-                if (live < 0.30f) return null;
+                if (live < 0.30f)
+                    return null;
             }
 
-            using var face = new Mat(input, bestRect);
+            // ---------- SFace ----------
+            using var face = new Mat(input, rect);
             Cv2.Resize(face, face, new Size(112, 112));
 
-            using var recBlob = CvDnn.BlobFromImage(face, 1 / 255.0);
-            _recognizer.SetInput(recBlob);
+            using var recBlob = CvDnn.BlobFromImage(
+                face,
+                1.0 / 255.0,
+                new Size(112, 112),
+                new Scalar(),
+                swapRB: true,
+                crop: false
+            );
 
+            _recognizer.SetInput(recBlob);
             using var feat = _recognizer.Forward();
+
             feat.GetArray(out float[] vec);
 
             Normalize(vec);
             return vec;
         }
     }
+
 
     // -------------------------- MATCH -------------------------- //
 
