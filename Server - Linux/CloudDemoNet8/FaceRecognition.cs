@@ -65,12 +65,16 @@ public static class FaceMatch
 
         lock (_aiLock)
         {
-            // ---------- YuNet expects original image size ----------
+            const int YUNET_SIZE = 320;
+
+            using var resized = new Mat();
+            Cv2.Resize(input, resized, new Size(YUNET_SIZE, YUNET_SIZE));
+
             using var blob = CvDnn.BlobFromImage(
-                input,
+                resized,
                 1.0,
-                new Size(input.Width, input.Height),
-                new Scalar(),
+                new Size(YUNET_SIZE, YUNET_SIZE),
+                new Scalar(0, 0, 0),
                 swapRB: true,
                 crop: false
             );
@@ -78,19 +82,21 @@ public static class FaceMatch
             _detector.SetInput(blob);
             using var det = _detector.Forward();
 
-            // Expected shape: [1, N, 15]
-            if (det.Dims != 3 || det.Size(2) < 6)
+            if (det.Dims != 3 || det.Size(2) != 15)
             {
-                Log.Warning("[FACE][DETECT] Invalid YuNet output shape");
+                Log.Warning(
+                    "[FACE][DETECT] Invalid YuNet output: Dims={Dims}, Shape=1x{N}x{C}",
+                    det.Dims,
+                    det.Size(1),
+                    det.Size(2)
+                );
                 return null;
             }
 
             int bestIdx = -1;
             float bestScore = 0f;
 
-            int count = det.Size(1);
-
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < det.Size(1); i++)
             {
                 float score = det.At<float>(0, i, 4);
                 if (score > bestScore)
@@ -103,13 +109,14 @@ public static class FaceMatch
             if (bestIdx < 0 || bestScore < 0.6f)
                 return null;
 
-            // YuNet format: x, y, w, h (ABSOLUTE PIXELS)
-            int x = (int)det.At<float>(0, bestIdx, 0);
-            int y = (int)det.At<float>(0, bestIdx, 1);
-            int w = (int)det.At<float>(0, bestIdx, 2);
-            int h = (int)det.At<float>(0, bestIdx, 3);
+            float sx = (float)input.Width / YUNET_SIZE;
+            float sy = (float)input.Height / YUNET_SIZE;
 
-            // Clamp ROI
+            int x = (int)(det.At<float>(0, bestIdx, 0) * sx);
+            int y = (int)(det.At<float>(0, bestIdx, 1) * sy);
+            int w = (int)(det.At<float>(0, bestIdx, 2) * sx);
+            int h = (int)(det.At<float>(0, bestIdx, 3) * sy);
+
             x = Math.Clamp(x, 0, input.Width - 1);
             y = Math.Clamp(y, 0, input.Height - 1);
             w = Math.Clamp(w, 1, input.Width - x);
@@ -117,7 +124,6 @@ public static class FaceMatch
 
             var rect = new Rect(x, y, w, h);
 
-            // ---------- LIVENESS ----------
             if (checkLiveness)
             {
                 var sw = Stopwatch.StartNew();
@@ -135,7 +141,6 @@ public static class FaceMatch
                     return null;
             }
 
-            // ---------- SFace ----------
             using var face = new Mat(input, rect);
             Cv2.Resize(face, face, new Size(112, 112));
 
@@ -152,11 +157,12 @@ public static class FaceMatch
             using var feat = _recognizer.Forward();
 
             feat.GetArray(out float[] vec);
-
             Normalize(vec);
+
             return vec;
         }
     }
+
 
 
     // -------------------------- MATCH -------------------------- //
