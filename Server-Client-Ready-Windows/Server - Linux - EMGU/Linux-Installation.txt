@@ -14,20 +14,20 @@ Microsoft.NETCore.App 8.0.x
 
 2)
 sudo apt install -y \
-  liblapack3 \
-  libblas3 \
+  libgtk2.0-0t64 \
   libgeotiff5 \
-  libtiff6 \
   libjpeg8 \
-  libpng16-16 \
+  libpng16-16t64 \
   libopenjp2-7 \
-  libgtk2.0-0 \
   libavcodec60 \
   libavformat60 \
   libavutil58 \
   libswscale7 \
-  libhdf5-103 \
-  libvtk9.1
+  liblapack3 \
+  libblas3 \
+  libhdf5-103-1t64 \
+  ffmpeg \
+  libvtk9.1t64
 
 Verify:
 ldd libcvextern.so | grep "not found"
