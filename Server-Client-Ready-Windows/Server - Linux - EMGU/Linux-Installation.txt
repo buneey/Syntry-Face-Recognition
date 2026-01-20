@@ -1,0 +1,64 @@
+UBUNUTU 24.04 LTS
+
+1)
+sudo apt update
+sudo apt install -y dotnet-host-8.0 dotnet-runtime-8.0
+
+Verify:
+dotnet --info
+Expected:
+.NET SDKs installed:
+.NET runtimes installed:
+Microsoft.NETCore.App 8.0.x
+
+
+2)
+sudo apt install -y \
+  liblapack3 \
+  libblas3 \
+  libgeotiff5 \
+  libtiff6 \
+  libjpeg8 \
+  libpng16-16 \
+  libopenjp2-7 \
+  libgtk2.0-0 \
+  libavcodec60 \
+  libavformat60 \
+  libavutil58 \
+  libswscale7 \
+  libhdf5-103 \
+  libvtk9.1
+
+Verify:
+ldd libcvextern.so | grep "not found"
+Expected:
+*Nothing*
+
+3)
+dotnet CloudDemoNet8-Linux-EMGU.dll
+
+------------------------ RUNS THE SERVER ---------------------------
+
+PROBLEMS:
+
+❌ Ubuntu 22.04
+
+glibc 2.35
+
+EmguCV requires ≥ 2.38
+
+Impossible without recompiling OpenCV
+
+❌ AlmaLinux
+
+Older glibc
+
+Missing VTK / LAPACK ABI versions
+
+Emgu runtime not built for RHEL ecosystem
+
+❌ net8.0-windows
+
+Forces Windows APIs
+
+Breaks Linux runtime resolution
