@@ -121,7 +121,7 @@ public static class FaceMatch
                 "SELECT COUNT(*) FROM tblusers_face WHERE backupnum = 50 AND record IS NOT NULL";
 
             using (var countCmd = new MySqlCommand(sqlCount, conn))
-                totalUsers = (int)countCmd.ExecuteScalar();
+                totalUsers = Convert.ToInt32(countCmd.ExecuteScalar());
 
             Log.Information($"[FACE] Starting embedding refresh for {totalUsers} users...");
 
