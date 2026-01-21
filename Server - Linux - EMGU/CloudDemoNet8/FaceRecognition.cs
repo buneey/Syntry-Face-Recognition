@@ -2,7 +2,7 @@
 using Emgu.CV;
 using Emgu.CV.CvEnum;
 using Emgu.CV.Structure;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -48,15 +48,15 @@ public static class FaceMatch
 
     public static async Task<int> GenerateNextEnrollIdAsync(string connStr)
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new MySqlConnection(connStr);
         await conn.OpenAsync();
 
         const string sql = @"
-        SELECT ISNULL(MAX(enrollid), 999) + 1
+        SELECT IFNULL(MAX(enrollid), 999) + 1
         FROM tblusers_face WITH (UPDLOCK, HOLDLOCK);
     ";
 
-        using var cmd = new SqlCommand(sql, conn);
+        using var cmd = new MySqlCommand(sql, conn);
         return (int)await cmd.ExecuteScalarAsync();
     }
 
@@ -114,13 +114,13 @@ public static class FaceMatch
         // ============================
         try
         {
-            using var conn = new SqlConnection(connStr);
+            using var conn = new MySqlConnection(connStr);
             conn.Open();
 
             const string sqlCount =
                 "SELECT COUNT(*) FROM tblusers_face WHERE backupnum = 50 AND record IS NOT NULL";
 
-            using (var countCmd = new SqlCommand(sqlCount, conn))
+            using (var countCmd = new MySqlCommand(sqlCount, conn))
                 totalUsers = (int)countCmd.ExecuteScalar();
 
             Log.Information($"[FACE] Starting embedding refresh for {totalUsers} users...");
@@ -130,7 +130,7 @@ public static class FaceMatch
         FROM tblusers_face
         WHERE backupnum = 50 AND record IS NOT NULL";
 
-            using var cmd = new SqlCommand(sqlFaces, conn) { CommandTimeout = 300 };
+            using var cmd = new MySqlCommand(sqlFaces, conn) { CommandTimeout = 300 };
             using var reader = cmd.ExecuteReader();
 
             while (reader.Read())
@@ -222,7 +222,7 @@ public static class FaceMatch
             // 1. LIGHT snapshot
             var dbUsers = new Dictionary<int, bool>();
 
-            using (var conn = new SqlConnection(Program.ConnectionString))
+            using (var conn = new MySqlConnection(Program.ConnectionString))
             {
                 await conn.OpenAsync();
 
@@ -231,7 +231,7 @@ public static class FaceMatch
                 FROM tblusers_face
                 WHERE backupnum = 50 AND record IS NOT NULL";
 
-                using var cmd = new SqlCommand(sql, conn)
+                using var cmd = new MySqlCommand(sql, conn)
                 {
                     CommandTimeout = 60
                 };
@@ -274,7 +274,7 @@ public static class FaceMatch
                 }
             }
         }
-        catch (SqlException ex) when (ex.Number == -2)
+        catch (MySqlException ex) when (ex.Number == -2)
         {
             // Timeout — expected under load
             Log.Debug("[SYNC] DB timeout — skipping this cycle");
@@ -294,7 +294,7 @@ public static class FaceMatch
     {
         try
         {
-            using var conn = new SqlConnection(Program.ConnectionString);
+            using var conn = new MySqlConnection(Program.ConnectionString);
             await conn.OpenAsync();
 
             const string sql = @"
@@ -304,7 +304,7 @@ public static class FaceMatch
               AND backupnum = 50
               AND record IS NOT NULL";
 
-            using var cmd = new SqlCommand(sql, conn)
+            using var cmd = new MySqlCommand(sql, conn)
             {
                 CommandTimeout = 60
             };

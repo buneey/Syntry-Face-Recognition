@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Dapper;
 using System.Data;
 
@@ -15,7 +15,7 @@ namespace CloudDemoNet8
             _connString = connString;
         }
 
-        private IDbConnection CreateConnection() => new SqlConnection(_connString);
+        private IDbConnection CreateConnection() => new MySqlConnection(_connString);
 
         // 1. Check if a user exists with specific face data
         public async Task<bool> HasFaceDataAsync(int enrollId)
@@ -40,11 +40,11 @@ namespace CloudDemoNet8
                         username = @Name, 
                         admin = @Admin, 
                         record = @Record, 
-                        regdattime = GETDATE(), 
+                        regdattime = NOW(), 
                         isactive = 1
                 WHEN NOT MATCHED THEN
                     INSERT (enrollid, username, backupnum, admin, record, regdattime, isactive)
-                    VALUES (@Id, @Name, @Num, @Admin, @Record, GETDATE(), 1);";
+                    VALUES (@Id, @Name, @Num, @Admin, @Record, NOW(), 1);";
 
             await conn.ExecuteAsync(sql, new
             {
@@ -146,10 +146,10 @@ namespace CloudDemoNet8
         {
             var results = new List<(int, string, int)>();
 
-            using var conn = new SqlConnection(connStr);
+            using var conn = new MySqlConnection(connStr);
             await conn.OpenAsync();
 
-            using var cmd = new SqlCommand(@"
+            using var cmd = new MySqlCommand(@"
         SELECT enrollid, username, isactive
         FROM tblusers_face
         WHERE username LIKE @name
