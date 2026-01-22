@@ -884,11 +884,13 @@ namespace CloudDemoNet8
                     false,
                     new { error = "Invalid enrollId" }
                 );
+
+                Log.Warning("[SET ACTIVE] User not found | EnrollID={EnrollId}", enrollId);
                 return;
             }
             if (!FaceMatch.Users.TryGetValue(enrollId, out var user))
             {
-                Log.Information("[DELETE] User not found | EnrollID={EnrollId}", enrollId);
+                Log.Information("[SET ACTIVE] User not found | EnrollID={EnrollId}", enrollId);
                 await SafeSendReplyAsync(
                     s,
                     "admin_set_active",
@@ -909,6 +911,11 @@ namespace CloudDemoNet8
                 true,
                 new { message = active ? $"User {enrollId} activated" : $"User {enrollId} deactivated" }
             );
+
+            if(active)
+                Log.Information("[SET ACTIVE] User Activated | EnrollID={EnrollId}", enrollId);
+            else
+                Log.Information("[SET ACTIVE] User Deactivated  | EnrollID={EnrollId}", enrollId);
         }
 
         private static async Task HandleAdminGetUser(WebSocketSession s, JObject j)
