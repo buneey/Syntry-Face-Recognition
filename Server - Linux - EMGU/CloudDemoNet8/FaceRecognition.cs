@@ -59,7 +59,7 @@ public static class FaceMatch
 
 
         using var cmd = new MySqlCommand(sql, conn);
-        return (int)await cmd.ExecuteScalarAsync();
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
     // -------------------------- Init Models -------------------------- //
