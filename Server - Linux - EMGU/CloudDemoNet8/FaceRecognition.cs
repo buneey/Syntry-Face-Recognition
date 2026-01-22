@@ -53,8 +53,10 @@ public static class FaceMatch
 
         const string sql = @"
         SELECT IFNULL(MAX(enrollid), 999) + 1
-        FROM tblusers_face WITH (UPDLOCK, HOLDLOCK);
-    ";
+        FROM tblusers_face
+        FOR UPDATE;
+        ";
+
 
         using var cmd = new MySqlCommand(sql, conn);
         return (int)await cmd.ExecuteScalarAsync();
