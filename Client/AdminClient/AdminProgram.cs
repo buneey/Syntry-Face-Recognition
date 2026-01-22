@@ -224,6 +224,7 @@ namespace Syntery.AdminClient
                     "Live Monitor",
                     "Change Server Port",
                     "Check Server",
+                    "Reboot Device",
                     "Exit"
                 })
         );
@@ -281,6 +282,12 @@ namespace Syntery.AdminClient
                     case "Change Server Port":
                         HandleChangePortAsync();
                         break;
+
+                    case "Reboot Device":
+                        HandleRebootDevice();
+                        Pause();
+                        break;
+
 
 
                     case "Check Server":
@@ -755,6 +762,36 @@ namespace Syntery.AdminClient
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(new string('═', 95));
         }
+
+        private static void HandleRebootDevice()
+        {
+            RequestDeviceList();
+
+            if (!WaitForDevices())
+            {
+                EnqueueUiMessage("[red]No devices connected[/]");
+                return;
+            }
+
+            var sn = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Select [red]Device to Reboot[/]:")
+                    .AddChoices(_connectedDevices)
+            );
+
+            bool confirm = AnsiConsole.Confirm($"[red]Reboot device {sn}?[/]");
+            if (!confirm)
+                return;
+
+            Send(new JObject
+            {
+                ["cmd"] = "admin_reboot",
+                ["deviceSn"] = sn
+            });
+
+            EnqueueUiMessage($"[yellow]Reboot command sent to {sn}[/]");
+        }
+
 
     }
 }

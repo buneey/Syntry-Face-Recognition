@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Dapper;
 using System.Data;
 
@@ -15,7 +15,7 @@ namespace CloudDemoNet8
             _connString = connString;
         }
 
-        private IDbConnection CreateConnection() => new SqlConnection(_connString);
+        private IDbConnection CreateConnection() => new MySqlConnection(_connString);
 
         // 1. Check if a user exists with specific face data
         public async Task<bool> HasFaceDataAsync(int enrollId)
@@ -32,19 +32,16 @@ namespace CloudDemoNet8
         {
             using var conn = CreateConnection();
             const string sql = @"
-                MERGE tblusers_face AS target
-                USING (SELECT @Id AS enrollid, @Num AS backupnum) AS source
-                ON (target.enrollid = source.enrollid AND target.backupnum = source.backupnum)
-                WHEN MATCHED THEN
-                    UPDATE SET 
-                        username = @Name, 
-                        admin = @Admin, 
-                        record = @Record, 
-                        regdattime = GETDATE(), 
-                        isactive = 1
-                WHEN NOT MATCHED THEN
-                    INSERT (enrollid, username, backupnum, admin, record, regdattime, isactive)
-                    VALUES (@Id, @Name, @Num, @Admin, @Record, GETDATE(), 1);";
+            INSERT INTO tblusers_face
+            (enrollid, username, backupnum, admin, record, regdattime, isactive)
+            VALUES
+            (@Id, @Name, @Num, @Admin, @Record, NOW(), 1)
+            ON DUPLICATE KEY UPDATE
+                username    = VALUES(username),
+                admin       = VALUES(admin),
+                record      = VALUES(record),
+                regdattime  = NOW(),
+                isactive    = 1;";
 
             await conn.ExecuteAsync(sql, new
             {
@@ -62,10 +59,11 @@ namespace CloudDemoNet8
 
             // 1️ Get THIS USER'S last scan time only
             const string lastScanSql = @"
-                SELECT TOP 1 attendattime
-                FROM tblattendance_face
-                WHERE enrollid = @EnrollId
-                ORDER BY attendattime DESC";
+            SELECT attendattime
+            FROM tblattendance_face
+            WHERE enrollid = @EnrollId
+            ORDER BY attendattime DESC
+            LIMIT 1";
 
             var lastScanTime = await conn.ExecuteScalarAsync<DateTime?>(lastScanSql,new { EnrollId = enrollId });
 
@@ -97,28 +95,19 @@ namespace CloudDemoNet8
 
         }
 
-        
-
-        /*
-        // 3. Log Attendance
-        public async Task LogAttendanceAsync(int? enrollId, string deviceSn, DateTime time, double? distance)
-        {
-            using var conn = CreateConnection();
-            const string sql = @"
-                INSERT INTO tblattendance_face (enrollid, device, attendattime) 
-                VALUES (@Id, @Sn, @Time)";
-
-            await conn.ExecuteAsync(sql, new { Id = enrollId, Sn = deviceSn, Time = time });
-        }
-        */
-
         // 4. Set User Active Status
         public async Task SetUserActiveAsync(int enrollId, bool isActive)
         {
             using var conn = CreateConnection();
             await conn.ExecuteAsync(
-                "UPDATE tblusers_face SET isactive = @Active WHERE enrollid = @Id",
-                new { Active = isActive ? 1 : 0, Id = enrollId });
+                @"UPDATE tblusers_face 
+                  SET isactive = @Active 
+                  WHERE enrollid = @Id",
+                new
+                {
+                    Active = isActive ? 1 : 0,
+                    Id = enrollId
+                });
         }
 
         // 5. Delete User (FULL DELETE )
@@ -137,24 +126,26 @@ namespace CloudDemoNet8
         {
             using var conn = CreateConnection();
             return conn.QueryFirstOrDefault<string>(
-                "SELECT TOP 1 username FROM tblusers_face WHERE enrollid = @Id",
+                @"SELECT username 
+                  FROM tblusers_face 
+                  WHERE enrollid = @Id 
+                  LIMIT 1",
                 new { Id = enrollId });
         }
 
         public static async Task<List<(int EnrollId, string UserName, int IsActive)>>
-    SearchUsersByNameAsync(string connStr, string name)
+            SearchUsersByNameAsync(string connStr, string name)
         {
             var results = new List<(int, string, int)>();
 
-            using var conn = new SqlConnection(connStr);
+            using var conn = new MySqlConnection(connStr);
             await conn.OpenAsync();
 
-            using var cmd = new SqlCommand(@"
-        SELECT enrollid, username, isactive
-        FROM tblusers_face
-        WHERE username LIKE @name
-        ORDER BY username
-    ", conn);
+            using var cmd = new MySqlCommand(@"
+            SELECT enrollid, username, isactive
+            FROM tblusers_face
+            WHERE username LIKE @name
+            ORDER BY username", conn);
 
             cmd.Parameters.AddWithValue("@name", $"%{name}%");
 
