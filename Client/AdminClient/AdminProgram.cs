@@ -223,8 +223,9 @@ namespace Syntery.AdminClient
                     "Get User Details",
                     "Live Monitor",
                     "Change Server Port",
-                    "Check Server",
                     "Reboot Device",
+                    "Set Device Time",
+                    "Check Server",
                     "Exit"
                 })
         );
@@ -285,6 +286,10 @@ namespace Syntery.AdminClient
 
                     case "Reboot Device":
                         HandleRebootDevice();
+                        Pause();
+                        break;
+                    case "Set Device Time":
+                        HandleSetTime();
                         Pause();
                         break;
 
