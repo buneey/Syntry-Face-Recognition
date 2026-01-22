@@ -530,6 +530,10 @@ namespace CloudDemoNet8
                             // ACTIVE
                             await ReplyAccess(s, 1, $"Welcome {u.UserName}");
                             _ = _repo.LogAttendanceAsync(id, sn, DateTime.Now, d);
+                            Log.Information(
+                            "[SCAN] Status = Approved | EnrollID={EnrollId} | User={User} | Device={SN}",
+                            p.EnrollId, p.UserName, sn
+                            );
 
 
                         }
@@ -537,6 +541,10 @@ namespace CloudDemoNet8
                         {
                             // INACTIVE
                             await ReplyAccess(s, 0, $"User inactive: {u.UserName}");
+                            Log.Information(
+                            "[SCAN] Status = Blocked | Reason : User Inactive | EnrollID={EnrollId} | User={User} | Device={SN}",
+                            p.EnrollId, p.UserName, sn
+                            );
 
                         }
                     }
@@ -544,6 +552,10 @@ namespace CloudDemoNet8
                     {
                         // ❓ NOT FOUND
                         await ReplyAccess(s, 0, "User not found");
+                        Log.Information(
+                            "[SCAN] Status = Blocked | Reason = User Not Found | Device={SN}",
+                            p.EnrollId, p.UserName, sn
+                            );
 
                         if (!string.IsNullOrEmpty(img))
                         {

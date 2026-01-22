@@ -95,21 +95,6 @@ namespace CloudDemoNet8
 
         }
 
-        
-
-        /*
-        // 3. Log Attendance
-        public async Task LogAttendanceAsync(int? enrollId, string deviceSn, DateTime time, double? distance)
-        {
-            using var conn = CreateConnection();
-            const string sql = @"
-                INSERT INTO tblattendance_face (enrollid, device, attendattime) 
-                VALUES (@Id, @Sn, @Time)";
-
-            await conn.ExecuteAsync(sql, new { Id = enrollId, Sn = deviceSn, Time = time });
-        }
-        */
-
         // 4. Set User Active Status
         public async Task SetUserActiveAsync(int enrollId, bool isActive)
         {
