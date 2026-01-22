@@ -32,19 +32,16 @@ namespace CloudDemoNet8
         {
             using var conn = CreateConnection();
             const string sql = @"
-                MERGE tblusers_face AS target
-                USING (SELECT @Id AS enrollid, @Num AS backupnum) AS source
-                ON (target.enrollid = source.enrollid AND target.backupnum = source.backupnum)
-                WHEN MATCHED THEN
-                    UPDATE SET 
-                        username = @Name, 
-                        admin = @Admin, 
-                        record = @Record, 
-                        regdattime = NOW(), 
-                        isactive = 1
-                WHEN NOT MATCHED THEN
-                    INSERT (enrollid, username, backupnum, admin, record, regdattime, isactive)
-                    VALUES (@Id, @Name, @Num, @Admin, @Record, NOW(), 1);";
+            INSERT INTO tblusers_face
+            (enrollid, username, backupnum, admin, record, regdattime, isactive)
+            VALUES
+            (@Id, @Name, @Num, @Admin, @Record, NOW(), 1)
+            ON DUPLICATE KEY UPDATE
+                username    = VALUES(username),
+                admin       = VALUES(admin),
+                record      = VALUES(record),
+                regdattime  = NOW(),
+                isactive    = 1;";
 
             await conn.ExecuteAsync(sql, new
             {
@@ -62,10 +59,11 @@ namespace CloudDemoNet8
 
             // 1️ Get THIS USER'S last scan time only
             const string lastScanSql = @"
-                SELECT TOP 1 attendattime
-                FROM tblattendance_face
-                WHERE enrollid = @EnrollId
-                ORDER BY attendattime DESC";
+            SELECT attendattime
+            FROM tblattendance_face
+            WHERE enrollid = @EnrollId
+            ORDER BY attendattime DESC
+            LIMIT 1";
 
             var lastScanTime = await conn.ExecuteScalarAsync<DateTime?>(lastScanSql,new { EnrollId = enrollId });
 
@@ -117,8 +115,14 @@ namespace CloudDemoNet8
         {
             using var conn = CreateConnection();
             await conn.ExecuteAsync(
-                "UPDATE tblusers_face SET isactive = @Active WHERE enrollid = @Id",
-                new { Active = isActive ? 1 : 0, Id = enrollId });
+                @"UPDATE tblusers_face 
+                  SET isactive = @Active 
+                  WHERE enrollid = @Id",
+                new
+                {
+                    Active = isActive ? 1 : 0,
+                    Id = enrollId
+                });
         }
 
         // 5. Delete User (FULL DELETE )
@@ -137,12 +141,15 @@ namespace CloudDemoNet8
         {
             using var conn = CreateConnection();
             return conn.QueryFirstOrDefault<string>(
-                "SELECT TOP 1 username FROM tblusers_face WHERE enrollid = @Id",
+                @"SELECT username 
+                  FROM tblusers_face 
+                  WHERE enrollid = @Id 
+                  LIMIT 1",
                 new { Id = enrollId });
         }
 
         public static async Task<List<(int EnrollId, string UserName, int IsActive)>>
-    SearchUsersByNameAsync(string connStr, string name)
+            SearchUsersByNameAsync(string connStr, string name)
         {
             var results = new List<(int, string, int)>();
 
@@ -150,11 +157,10 @@ namespace CloudDemoNet8
             await conn.OpenAsync();
 
             using var cmd = new MySqlCommand(@"
-        SELECT enrollid, username, isactive
-        FROM tblusers_face
-        WHERE username LIKE @name
-        ORDER BY username
-    ", conn);
+            SELECT enrollid, username, isactive
+            FROM tblusers_face
+            WHERE username LIKE @name
+            ORDER BY username", conn);
 
             cmd.Parameters.AddWithValue("@name", $"%{name}%");
 
