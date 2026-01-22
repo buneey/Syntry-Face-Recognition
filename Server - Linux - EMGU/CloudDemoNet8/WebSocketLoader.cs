@@ -243,8 +243,20 @@ namespace CloudDemoNet8
                         }
                         break;
                     }
-
-
+                case "admin_set_time":
+                    {
+                        string sn = json.Value<string>("deviceSn") ?? "";
+                        if (IsDeviceConnected(sn))
+                        {
+                            await SendCommandAsync(GetSessionByID(sn)!, "settime", new { cloudtime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
+                            await SafeSendReplyAsync(session, "admin_set_time", true, new { message = $"Set time command sent to {sn}" });
+                        }
+                        else
+                        {
+                            await SafeSendReplyAsync(session, "admin_set_time", false, new { error = "Device not connected" });
+                        }
+                        break;
+                    }
 
                 default:
                     Log.Warning("[WS] Unknown command: {Cmd}", cmd);
@@ -985,16 +997,6 @@ namespace CloudDemoNet8
             );
         }
 
-
-        public static async Task RebootAsync(string sn)
-        {
-            var s = GetSessionByID(sn);
-            if (s != null)
-                await SendCommandAsync(s, "reboot");
-        }
-
-
-
         //---------------- UTILITIES ----------------
         private static bool IsDeviceConnected(string sn)
         {
@@ -1015,7 +1017,6 @@ namespace CloudDemoNet8
 
         // Console wrappers
         /* Move to Admin Client
-        public static async Task reboot(string sn) { var s = GetSessionByID(sn); if (s != null) await SendCommandAsync(s, "reboot"); }
         public static async Task settime(string sn) { var s = GetSessionByID(sn); if (s != null) await SendCommandAsync(s, "settime", new { cloudtime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") }); }
         public static async Task cleanlog(string sn) => await CleanDeviceLogs(sn);
         public static async Task cleanuser(string sn) { var s = GetSessionByID(sn); if (s != null) await SendCommandAsync(s, "cleanuser"); }

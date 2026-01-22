@@ -762,6 +762,28 @@ namespace Syntery.AdminClient
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(new string('═', 95));
         }
+        private static void HandleSetTime()
+        {
+            RequestDeviceList();
+            if (!WaitForDevices())
+            {
+                EnqueueUiMessage("[red]No devices connected[/]");
+                return;
+            }
+            var sn = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Select [green]Device to Set Time[/]:")
+                    .AddChoices(_connectedDevices)
+            );
+            Send(new JObject
+            {
+                ["cmd"] = "admin_set_time",
+                ["deviceSn"] = sn,
+                ["time"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+            });
+            EnqueueUiMessage($"[green]Set time command sent to {sn}[/]");
+
+        }
 
         private static void HandleRebootDevice()
         {

@@ -1,4 +1,4 @@
-UBUNUTU 24.04 LTS
+UBUNUTU 24.04 LTS / BRIDGED NETWORK for VM
 
 1)
 sudo apt update
@@ -81,6 +81,9 @@ export LD_LIBRARY_PATH=$PWD:$PWD/runtimes/ubuntu-x64/native:$LD_LIBRARY_PATH
 RUN Server:
 
 dotnet CloudDemoNet8-Linux-EMGU.dll
+
+To Find Server IP:
+ip a
 
 ------------------------ RUNS THE SERVER ---------------------------
 
