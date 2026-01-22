@@ -229,6 +229,21 @@ namespace CloudDemoNet8
                         break;
                     }
 
+                case "admin_reboot":
+                    {
+                        string sn = json.Value<string>("deviceSn") ?? "";
+                        if (IsDeviceConnected(sn))
+                        {
+                            await SendCommandAsync(GetSessionByID(sn)!, "reboot");
+                            await SafeSendReplyAsync(session, "admin_reboot", true, new { message = $"Reboot sent to {sn}" });
+                        }
+                        else
+                        {
+                            await SafeSendReplyAsync(session, "admin_reboot", false, new { error = "Device not connected" });
+                        }
+                        break;
+                    }
+
 
 
                 default:
@@ -969,6 +984,17 @@ namespace CloudDemoNet8
                 }
             );
         }
+
+
+        public static async Task RebootAsync(string sn)
+        {
+            var s = GetSessionByID(sn);
+            if (s != null)
+                await SendCommandAsync(s, "reboot");
+        }
+
+
+
         //---------------- UTILITIES ----------------
         private static bool IsDeviceConnected(string sn)
         {
