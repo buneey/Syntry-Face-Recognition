@@ -3,6 +3,8 @@ UBUNUTU 24.04 LTS
 1)
 sudo apt update
 sudo apt install -y dotnet-host-8.0 dotnet-runtime-8.0
+or
+sudo apt install -y dotnet-sdk-8.0
 
 Verify:
 dotnet --info
@@ -34,7 +36,50 @@ ldd libcvextern.so | grep "not found"
 Expected:
 *Nothing*
 
-3)
+3) Test Server:
+
+dotnet CloudDemoNet8-Linux-EMGU.dll
+
+------------------------ MySQL Setup -------------------------------
+
+sudo apt install -y mysql-server
+
+sudo systemctl enable mysql
+
+sudo systemctl start mysql
+
+sudo mysql
+
+CREATE DATABASE db_fb;
+CREATE USER 'syntry_user'@'%' IDENTIFIED BY 'StrongPassword123!';
+GRANT ALL PRIVILEGES ON db_fb.* TO 'syntry_user'@'%';
+FLUSH PRIVILEGES;
+EXIT;
+
+mysql -u syntry_user -p db_fb
+
+
+CREATE TABLE tblusers_face (
+  enrollid INT NOT NULL PRIMARY KEY,
+  username TEXT,
+  backupnum INT,
+  admin INT,
+  record LONGTEXT,
+  regdattime DATETIME,
+  isactive INT
+);
+
+CREATE TABLE tblattendance_face (
+  enrollid TEXT,
+  device TEXT,
+  attendattime DATETIME
+);
+
+FROM INSIDE THE SERVER FOLDER:
+export LD_LIBRARY_PATH=$PWD:$PWD/runtimes/ubuntu-x64/native:$LD_LIBRARY_PATH
+
+RUN Server:
+
 dotnet CloudDemoNet8-Linux-EMGU.dll
 
 ------------------------ RUNS THE SERVER ---------------------------
