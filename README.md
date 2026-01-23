@@ -75,8 +75,11 @@ UBUNUTU 24.04 LTS / BRIDGED NETWORK for VM
 
 1)
 sudo apt update
+
 sudo apt install -y dotnet-host-8.0 dotnet-runtime-8.0
+
 or
+
 sudo apt install -y dotnet-sdk-8.0
 
 Verify:
