@@ -230,6 +230,34 @@ namespace CloudDemoNet8
                         break;
                     }
 
+                case "admin_reboot":
+                    {
+                        string sn = json.Value<string>("deviceSn") ?? "";
+                        if (IsDeviceConnected(sn))
+                        {
+                            await SendCommandAsync(GetSessionByID(sn)!, "reboot");
+                            await SafeSendReplyAsync(session, "admin_reboot", true, new { message = $"Reboot sent to {sn}" });
+                        }
+                        else
+                        {
+                            await SafeSendReplyAsync(session, "admin_reboot", false, new { error = "Device not connected" });
+                        }
+                        break;
+                    }
+                case "admin_set_time":
+                    {
+                        string sn = json.Value<string>("deviceSn") ?? "";
+                        if (IsDeviceConnected(sn))
+                        {
+                            await SendCommandAsync(GetSessionByID(sn)!, "settime", new { cloudtime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
+                            await SafeSendReplyAsync(session, "admin_set_time", true, new { message = $"Set time command sent to {sn}" });
+                        }
+                        else
+                        {
+                            await SafeSendReplyAsync(session, "admin_set_time", false, new { error = "Device not connected" });
+                        }
+                        break;
+                    }
 
 
                 default:
@@ -527,20 +555,30 @@ namespace CloudDemoNet8
                             // ACTIVE
                             await ReplyAccess(s, 1, $"Welcome {u.UserName}");
                             _ = _repo.LogAttendanceAsync(id, sn, DateTime.Now, d);
-
+                            Log.Information(
+                            "[SCAN] Status = Approved | EnrollID={EnrollId} | User={User} | Device={SN}",
+                            id, u.UserName, sn
+                            );
 
                         }
                         else
                         {
                             // INACTIVE
                             await ReplyAccess(s, 0, $"User inactive: {u.UserName}");
-
+                            Log.Information(
+                            "[SCAN] Status = Blocked | Reason : User Inactive | EnrollID={EnrollId} | User={User} | Device={SN}",
+                            id, u.UserName, sn
+                            );
                         }
                     }
                     else
                     {
                         // ❓ NOT FOUND
                         await ReplyAccess(s, 0, "User not found");
+                        Log.Information(
+                            "[SCAN] Status = Blocked | Reason = User Not Found | Device={SN}",
+                            id, sn
+                            );
 
                         if (!string.IsNullOrEmpty(img))
                         {
@@ -906,6 +944,11 @@ namespace CloudDemoNet8
                 true,
                 new { message = active ? $"User {enrollId} activated" : $"User {enrollId} deactivated" }
             );
+
+            if (active)
+                Log.Information("[SET ACTIVE] User Activated | EnrollID={EnrollId}", enrollId);
+            else
+                Log.Information("[SET ACTIVE] User Deactivated  | EnrollID={EnrollId}", enrollId);
         }
 
         private static async Task HandleAdminGetUser(WebSocketSession s, JObject j)
