@@ -223,8 +223,9 @@ namespace Syntery.AdminClient
                     "Get User Details",
                     "Live Monitor",
                     "Change Server Port",
-                    "Check Server",
                     "Reboot Device",
+                    "Set Device Time",
+                    "Check Server",
                     "Exit"
                 })
         );
@@ -285,6 +286,10 @@ namespace Syntery.AdminClient
 
                     case "Reboot Device":
                         HandleRebootDevice();
+                        Pause();
+                        break;
+                    case "Set Device Time":
+                        HandleSetTime();
                         Pause();
                         break;
 
@@ -761,6 +766,28 @@ namespace Syntery.AdminClient
             AnsiConsole.Write(tree);
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(new string('═', 95));
+        }
+        private static void HandleSetTime()
+        {
+            RequestDeviceList();
+            if (!WaitForDevices())
+            {
+                EnqueueUiMessage("[red]No devices connected[/]");
+                return;
+            }
+            var sn = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Select [green]Device to Set Time[/]:")
+                    .AddChoices(_connectedDevices)
+            );
+            Send(new JObject
+            {
+                ["cmd"] = "admin_set_time",
+                ["deviceSn"] = sn,
+                ["time"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+            });
+            EnqueueUiMessage($"[green]Set time command sent to {sn}[/]");
+
         }
 
         private static void HandleRebootDevice()
