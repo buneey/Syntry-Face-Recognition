@@ -21,6 +21,9 @@ public static class FaceMatch
         public bool IsActive { get; set; }
     }
 
+    private static double _matchThreshold = 0.40;
+    private static float _livenessThreshold = 0.30f;
+
     // Protects the AI
     private static readonly object _aiLock = new();
 
@@ -64,20 +67,31 @@ public static class FaceMatch
 
     // -------------------------- Init Models -------------------------- //
 
-    public static void InitModels(string detPath, string recPath, string spoofPath)
+    public static void InitModels(
+    string detPath,
+    string recPath,
+    string spoofPath,
+    double matchThreshold,
+    float livenessThreshold)
     {
+        _matchThreshold = matchThreshold;
+        _livenessThreshold = livenessThreshold;
+
         _detector?.Dispose();
         _recognizer?.Dispose();
-
-        if (!File.Exists(detPath)) throw new FileNotFoundException(detPath);
-        if (!File.Exists(recPath)) throw new FileNotFoundException(recPath);
 
         _detector = new FaceDetectorYN(detPath, "", new Size(0, 0), 0.8f, 0.3f, 5000);
         _recognizer = new FaceRecognizerSF(recPath, "", 0, 0);
 
         AntiSpoofing.Init(spoofPath);
-        Log.Information("[FACE] Models loaded");
+
+        Log.Information(
+            "[FACE] Models loaded | MatchThreshold={Match} | LivenessThreshold={Live}",
+            _matchThreshold,
+            _livenessThreshold
+        );
     }
+
 
     // -------------------------- Load Embeddings -------------------------- //
     private sealed class RawFaceRow
@@ -168,12 +182,15 @@ public static class FaceMatch
             if (rawMat.IsEmpty)
                 continue;
 
-            float[]? vector = GetFaceFeature(rawMat, null);
-            if (vector == null)
+            var result = GetFaceFeature(rawMat, checkLiveness: false);
+            if (result == null)
             {
                 Log.Information($"[FACE] Skipped EnrollID {row.EnrollId} (no valid face)");
                 continue;
             }
+
+            var vector = result.Value.Vector;
+
 
             tempEmbeddings.Add(vector);
             tempLabels.Add(row.EnrollId);
@@ -334,32 +351,44 @@ public static class FaceMatch
 
     // -------------------------- Matching -------------------------- //
 
-    public static (bool FaceMatched, int label, double score) MatchFaceFromBase64(string probeBase64)
+    public static FaceMatchResult MatchFaceFromBase64(string probeBase64)
+{
+    using var probeMat = DecodeBase64ToMat(probeBase64);
+    if (probeMat.IsEmpty)
+        return new(false, -1, 0, null);
+
+    var result = GetFaceFeature(probeMat, checkLiveness: true);
+    if (result == null)
+        return new(false, -1, 0, null);
+
+    var (probeVec, liveness) = result.Value;
+
+    int bestId = -1;
+    double bestScore = 0;
+
+    lock (_lock)
     {
-        using var probeMat = DecodeBase64ToMat(probeBase64);
-        if (probeMat.IsEmpty) return (false, -1, 0);
-
-        float[]? probeVec = GetFaceFeature(probeMat, null, checkLiveness: true);
-        if (probeVec == null) return (false, -1, 0);
-
-        int bestId = -1;
-        double bestScore = 0;
-
-        lock (_lock)
+        for (int i = 0; i < _knownEmbeddings.Count; i++)
         {
-            for (int i = 0; i < _knownEmbeddings.Count; i++)
+            double s = Cosine(probeVec, _knownEmbeddings[i]);
+            if (s > bestScore)
             {
-                double s = Cosine(probeVec, _knownEmbeddings[i]);
-                if (s > bestScore)
-                {
-                    bestScore = s;
-                    bestId = _knownLabels[i];
-                }
+                bestScore = s;
+                bestId = _knownLabels[i];
             }
         }
-
-        return (bestScore > MatchThreshold, bestId, bestScore);
     }
+
+    bool matched = bestScore > _matchThreshold;
+
+    return new FaceMatchResult(
+        matched,
+        bestId,
+        bestScore,
+        liveness
+    );
+}
+
 
     // -------------------------- Core AI -------------------------- //
     public sealed class LivenessResult
@@ -369,10 +398,20 @@ public static class FaceMatch
         public long TimeMs { get; init; }
     }
 
-    public static LivenessResult? LastLivenessResult { get; private set; }
-    private static float[]? GetFaceFeature(Mat input, string? dbg, bool checkLiveness = false)
+    //public static LivenessResult? LastLivenessResult { get; private set; }
+    public sealed record FaceMatchResult(
+            bool Matched,
+            int EnrollId,
+            double Score,
+            LivenessResult? Liveness
+        );
+
+
+    private static (float[] Vector, LivenessResult? Liveness)?
+    GetFaceFeature(Mat input, bool checkLiveness)
     {
-        if (_detector == null || _recognizer == null) return null;
+        if (_detector == null || _recognizer == null)
+            return null;
 
         using var resized = new Mat();
         CvInvoke.Resize(input, resized, new Size(0, 0), 1, 1);
@@ -380,43 +419,54 @@ public static class FaceMatch
         lock (_aiLock)
         {
             _detector.InputSize = resized.Size;
+
             using var faces = new Mat();
             _detector.Detect(resized, faces);
-            if (faces.Rows == 0) return null;
+
+            // Multi-face handled later (Tier 1.2)
+            if (faces.Rows == 0)
+                return null;
 
             using var faceRow = faces.Row(0);
+
             float[] d = new float[15];
             faceRow.CopyTo(d);
-            var rect = new Rectangle((int)d[0], (int)d[1], (int)d[2], (int)d[3]);
-            // COMMENT OUT TO DISABLE LIVNESS - HAVE TO COMMENT OUT IN BOTH PROGRAMS
+
+            var rect = new Rectangle(
+                (int)d[0], (int)d[1], (int)d[2], (int)d[3]);
+
+            LivenessResult? liveResult = null;
+
             if (checkLiveness)
             {
                 var sw = Stopwatch.StartNew();
-                float live = AntiSpoofing.Predict(resized, rect);
+                float prob = AntiSpoofing.Predict(resized, rect);
                 sw.Stop();
 
-                LastLivenessResult = new LivenessResult
+                liveResult = new LivenessResult
                 {
-                    Score = live,
-                    Prob = live, // or separate if you expose both
+                    Score = prob,
+                    Prob = prob,
                     TimeMs = sw.ElapsedMilliseconds
                 };
 
-                if (live < 0.30f)
+                if (prob < _livenessThreshold)
                     return null;
             }
 
-
             using var aligned = new Mat();
             _recognizer.AlignCrop(resized, faceRow, aligned);
+
             using var feat = new Mat();
             _recognizer.Feature(aligned, feat);
 
             float[] vec = new float[128];
             feat.CopyTo(vec);
-            return vec;
+
+            return (vec, liveResult);
         }
     }
+
 
     // -------------------------- RAM Operations -------------------------- //
 
@@ -427,8 +477,11 @@ public static class FaceMatch
         using var mat = DecodeBase64ToMat(b64);
         if (mat.IsEmpty) return;
 
-        var vec = GetFaceFeature(mat, null);
-        if (vec == null) return;
+        var result = GetFaceFeature(mat, checkLiveness: false);
+        if (result == null) return;
+
+        var vec = result.Value.Vector;
+
 
         lock (_lock)
         {

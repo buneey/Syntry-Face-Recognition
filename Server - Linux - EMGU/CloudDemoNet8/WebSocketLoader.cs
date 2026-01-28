@@ -522,7 +522,13 @@ namespace CloudDemoNet8
                 if (note.Contains("face not found", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(img))
                 {
 
-                    var (m, id, d) = FaceMatch.MatchFaceFromBase64(img);
+                    var result = FaceMatch.MatchFaceFromBase64(img);
+                    var m = result.Matched;
+                    var id = result.EnrollId;
+                    var d = result.Score;
+                    var live = result.Liveness;
+
+
 
                     FaceMatch.Users.TryGetValue(id, out var user);
 
@@ -542,14 +548,12 @@ namespace CloudDemoNet8
                         ["isActive"] = user?.IsActive ?? false,
                         ["hasFace"] = user?.HasFace ?? false,
 
-
-                        ["liveness"] = FaceMatch.LastLivenessResult == null
-                            ? null
-                            : JObject.FromObject(FaceMatch.LastLivenessResult)
+                        ["liveness"] = live == null
+                                        ? null
+                                        : JObject.FromObject(live)
                     });
 
-                    var live = FaceMatch.LastLivenessResult;
-
+  
                     if (m && FaceMatch.Users.TryGetValue(id, out var u))
                     {
                         if (u.IsActive)
