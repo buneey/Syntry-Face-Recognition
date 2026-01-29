@@ -748,18 +748,20 @@ namespace Syntery.AdminClient
             matchNode.AddNode($"Matched : {(bool)j["matched"]}");
             matchNode.AddNode($"Score   : {j["matchScore"]!.Value<double>():F3}");
 
-            if (j["liveness"] != null)
+            var livenessToken = j["liveness"];
+
+            if (livenessToken is JObject live)
             {
-                var live = j["liveness"]!;
                 var liveNode = tree.AddNode("[red]Liveness[/]");
-                liveNode.AddNode($"Score     : {live["Score"]}");
-                liveNode.AddNode($"Prob Real : {live["Prob"]}");
-                liveNode.AddNode($"Time (ms) : {live["TimeMs"]}");
+                liveNode.AddNode($"Score     : {live["Score"] ?? "N/A"}");
+                liveNode.AddNode($"Prob Real : {live["Prob"] ?? "N/A"}");
+                liveNode.AddNode($"Time (ms) : {live["TimeMs"] ?? "N/A"}");
             }
             else
             {
                 tree.AddNode("[grey]Liveness : Not Available[/]");
             }
+
 
             tree.AddNode($"[grey]Time : {j["time"]}[/]");
 
