@@ -31,7 +31,9 @@ namespace CloudDemoNet8
                 FaceMatch.InitModels(
                     Path.Combine(baseDir, _config["AI:FaceDetection"]!),
                     Path.Combine(baseDir, _config["AI:FaceRecognition"]!),
-                    Path.Combine(baseDir, _config["AI:AntiSpoof"]!)
+                    Path.Combine(baseDir, _config["AI:AntiSpoof"]!),
+                    _config.GetValue<double>("Face:MatchThreshold"),
+                    _config.GetValue<float>("Face:LivenessThreshold")
                 );
 
                 // 2. Load DB Data
