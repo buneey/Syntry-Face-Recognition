@@ -30,10 +30,6 @@ public static class FaceMatch
     // Full user cache: enrollId -> UserInfo
     public static ConcurrentDictionary<int, UserInfo> Users = new();
 
-    // -------------------------- Tunables -------------------------- //
-
-    private const double MatchThreshold = 0.40; // OLD value preserved
-
     // -------------------------- AI Models -------------------------- //
 
     private static FaceDetectorYN? _detector;
