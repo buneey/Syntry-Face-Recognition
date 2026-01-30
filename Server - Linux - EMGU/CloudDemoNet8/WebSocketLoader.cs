@@ -21,6 +21,8 @@ using SuperSocket.WebSocket.Server;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using static CloudDemoNet8.Program;
+using System.Threading.Channels;
+
 
 namespace CloudDemoNet8
 {
@@ -36,6 +38,16 @@ namespace CloudDemoNet8
 
 
         private static readonly ConcurrentDictionary<string, PendingEnrollment> _pendingEnrollmentsBySn = new();
+
+        private static readonly Channel<ScanJob> _scanQueue =
+            Channel.CreateBounded<ScanJob>(new BoundedChannelOptions(100)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+
+        private static readonly int _aiWorkerCount =
+            Math.Max(1, Environment.ProcessorCount / 2);
+
 
         private class PendingEnrollment
         {
@@ -85,6 +97,9 @@ namespace CloudDemoNet8
 
             _host = host;
             await host.StartAsync();
+
+            StartAiWorkers();
+
             return host;
         }
 
@@ -521,91 +536,23 @@ namespace CloudDemoNet8
 
                 if (note.Contains("face not found", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(img))
                 {
-
-                    var result = FaceMatch.MatchFaceFromBase64(img);
-                    var m = result.Matched;
-                    var id = result.EnrollId;
-                    var d = result.Score;
-                    var live = result.Liveness;
-
-
-
-                    FaceMatch.Users.TryGetValue(id, out var user);
-
-                    await BroadcastToAdminsAsync(new JObject
+                    var job = new ScanJob
                     {
-                        ["ret"] = "live_scan",
+                        DeviceSn = sn,
+                        ImageBase64 = img,
+                        Session = s,
+                        Timestamp = DateTime.UtcNow
+                    };
 
-                        ["deviceSn"] = sn,
-                        ["deviceIp"] = s.RemoteEndPoint?.ToString(),
-                        ["time"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-
-                        ["matched"] = m,
-                        ["matchScore"] = d,
-
-                        ["enrollId"] = id,
-                        ["userName"] = user?.UserName ?? "Unknown",
-                        ["isActive"] = user?.IsActive ?? false,
-                        ["hasFace"] = user?.HasFace ?? false,
-
-                        ["liveness"] = live == null
-                                        ? null
-                                        : JObject.FromObject(live)
-                    });
-
-  
-                    if (m && FaceMatch.Users.TryGetValue(id, out var u))
+                    if (!_scanQueue.Writer.TryWrite(job))
                     {
-                        if (u.IsActive)
-                        {
-                            // ACTIVE
-                            await ReplyAccess(s, 1, $"Welcome {u.UserName}");
-                            _ = _repo.LogAttendanceAsync(id, sn, DateTime.Now, d);
-                            Log.Information(
-                            "[SCAN] Status = Approved | EnrollID={EnrollId} | User={User} | Device={SN}",
-                            id, u.UserName, sn
-                            );
-
-
-                        }
-                        else
-                        {
-                            // INACTIVE
-                            await ReplyAccess(s, 0, $"User inactive: {u.UserName}");
-                            Log.Information(
-                            "[SCAN] Status = Blocked | Reason : User Inactive | EnrollID={EnrollId} | User={User} | Device={SN}",
-                            id, u.UserName, sn
-                            );
-
-                        }
-                    }
-                    else
-                    {
-                        // ❓ NOT FOUND
-                        await ReplyAccess(s, 0, "User not found");
-                        Log.Information(
-                            "[SCAN] Status = Blocked | Reason = User Not Found | Device={SN}",
-                            id, sn
-                            );
-
-                        if (!string.IsNullOrEmpty(img))
-                        {
-                            var preview = img.Length > 200
-                                ? img.Substring(0, 200) + "..."
-                                : img;
-
-                            Log.Warning(
-                                "[FACE][NOT FOUND] Device={SN} EnrollID={EnrollId} ImageLength={Len}\nBase64Preview={Preview}",
-                                sn,
-                                id,
-                                img.Length,
-                                preview
-                            );
-                        }
+                        Log.Warning("[SCAN] Queue full — dropping scan from {SN}", sn);
                     }
 
-                    await CleanDeviceLogs(sn);
+                    // IMPORTANT: stop processing here
+                    continue;
                 }
+
 
             }
         }
@@ -765,6 +712,129 @@ namespace CloudDemoNet8
 
         //    return false;
         //}
+        // ---------------- AI WORKERS ----------------
+        private static async Task ProcessScanJob(ScanJob job)
+        {
+            var result = FaceMatch.MatchFaceFromBase64(job.ImageBase64);
+
+            var m = result.Matched;
+            var id = result.EnrollId;
+            var d = result.Score;
+            var live = result.Liveness;
+
+            FaceMatch.Users.TryGetValue(id, out var user);
+
+            // ---------------- ADMIN LIVE FEED ----------------
+            await BroadcastToAdminsAsync(new JObject
+            {
+                ["ret"] = "live_scan",
+                ["deviceSn"] = job.DeviceSn,
+                ["time"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+
+                ["matched"] = m,
+                ["matchScore"] = d,
+
+                ["enrollId"] = id,
+                ["userName"] = user?.UserName ?? "Unknown",
+                ["isActive"] = user?.IsActive ?? false,
+                ["hasFace"] = user?.HasFace ?? false,
+
+                ["liveness"] = live == null
+                    ? null
+                    : JObject.FromObject(live)
+            });
+
+            // ---------------- ACCESS DECISION ----------------
+            if (m && user != null)
+            {
+                if (user.IsActive)
+                {
+                    // ACTIVE USER
+                    await ReplyAccess(job.Session, 1, $"Welcome {user.UserName}");
+
+                    _ = _repo.LogAttendanceAsync(
+                        id,
+                        job.DeviceSn,
+                        DateTime.Now,
+                        d
+                    );
+
+                    Log.Information(
+                        "[SCAN] Status = Approved | EnrollID={EnrollId} | User={User} | Device={SN}",
+                        id,
+                        user.UserName,
+                        job.DeviceSn
+                    );
+                }
+                else
+                {
+                    // INACTIVE USER
+                    await ReplyAccess(job.Session, 0, $"User inactive: {user.UserName}");
+
+                    Log.Information(
+                        "[SCAN] Status = Blocked | Reason = User Inactive | EnrollID={EnrollId} | User={User} | Device={SN}",
+                        id,
+                        user.UserName,
+                        job.DeviceSn
+                    );
+                }
+            }
+            else
+            {
+                // ❓ USER NOT FOUND
+                await ReplyAccess(job.Session, 0, "User not found");
+
+                Log.Information(
+                    "[SCAN] Status = Blocked | Reason = User Not Found | Device={SN}",
+                    job.DeviceSn
+                );
+
+                if (!string.IsNullOrEmpty(job.ImageBase64))
+                {
+                    var preview = job.ImageBase64.Length > 200
+                        ? job.ImageBase64.Substring(0, 200) + "..."
+                        : job.ImageBase64;
+
+                    Log.Warning(
+                        "[FACE][NOT FOUND] Device={SN} EnrollID={EnrollId} ImageLength={Len}\nBase64Preview={Preview}",
+                        job.DeviceSn,
+                        id,
+                        job.ImageBase64.Length,
+                        preview
+                    );
+                }
+            }
+
+            // ---------------- DEVICE CLEANUP ----------------
+            await CleanDeviceLogs(job.DeviceSn);
+        }
+
+
+
+        private static void StartAiWorkers()
+        {
+            for (int i = 0; i < _aiWorkerCount; i++)
+            {
+                int workerId = i;
+
+                _ = Task.Run(async () =>
+                {
+                    Log.Information("[AI] Worker {Id} started", workerId);
+
+                    await foreach (var job in _scanQueue.Reader.ReadAllAsync())
+                    {
+                        try
+                        {
+                            await ProcessScanJob(job);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error(ex, "[AI] Worker {Id} failed", workerId);
+                        }
+                    }
+                });
+            }
+        }
 
         // ----------------  ADMIN HANDLERS ----------------
         private static async Task HandleAdminAddUser(WebSocketSession s, JObject j)
