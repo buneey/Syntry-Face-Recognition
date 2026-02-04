@@ -46,8 +46,7 @@ namespace CloudDemoNet8
                 FullMode = BoundedChannelFullMode.DropOldest
             });
 
-        private static readonly int _aiWorkerCount =
-            Math.Max(1, Environment.ProcessorCount / 2);
+        private static readonly int _aiWorkerCount = 2; // if want more = Math.Max(1, Environment.ProcessorCount / 2); // Number of AI workers   
 
 
         private class PendingEnrollment
