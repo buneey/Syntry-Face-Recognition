@@ -39,6 +39,7 @@ namespace CloudDemoNet8
 
         private static readonly ConcurrentDictionary<string, PendingEnrollment> _pendingEnrollmentsBySn = new();
 
+        // CONTROL QUEUE AI SCANS
         private static readonly Channel<ScanJob> _scanQueue =
             Channel.CreateBounded<ScanJob>(new BoundedChannelOptions(100)
             {
