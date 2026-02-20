@@ -40,6 +40,45 @@ Expected:
 
 dotnet CloudDemoNet8-Linux-EMGU.dll
 
+
+FOR SERVER INSTALLATION:
+sudo apt update && sudo apt update -y
+sudo apt install git -y
+sudo reboot
+git clone https:/
+sudo apt install -y dotnet-sdk-8.0
+sudo apt install -y \
+  libgtk2.0-0t64 \
+  libgeotiff5 \
+  libjpeg8 \
+  libpng16-16t64 \
+  libopenjp2-7 \
+  libavcodec60 \
+  libavformat60 \
+  libavutil58 \
+  libswscale7 \
+  liblapack3 \
+  libblas3 \
+  libhdf5-103-1t64 \
+  ffmpeg \
+  libvtk9.1t64
+
+Verify:
+ldd libcvextern.so | grep "not found"
+Expected:
+*Nothing*
+
+FOR SERVER INSTALLATION MIGHT NEED
+sudo apt install -y \
+  libgstreamer1.0-0 \
+  libgstreamer-plugins-base1.0-0 \
+  gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav
+
+dotnet CloudDemoNet8-Linux-EMGU.dll
 ------------------------ MySQL Setup -------------------------------
 
 sudo apt install -y mysql-server
@@ -51,12 +90,12 @@ sudo systemctl start mysql
 sudo mysql
 
 CREATE DATABASE db_fb;
-CREATE USER 'syntry_user'@'%' IDENTIFIED BY 'StrongPassword123!';
-GRANT ALL PRIVILEGES ON db_fb.* TO 'syntry_user'@'%';
+CREATE USER 'username'@'%' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON db_fb.* TO 'username'@'%';
 FLUSH PRIVILEGES;
 EXIT;
 
-mysql -u syntry_user -p db_fb
+mysql -u username -p db_fb
 
 
 CREATE TABLE tblusers_face (
