@@ -1,8 +1,10 @@
-﻿using CloudDemoNet8;
+﻿// PostgreSQL Ready
+using CloudDemoNet8;
 using Emgu.CV;
 using Emgu.CV.CvEnum;
 using Emgu.CV.Structure;
-using MySqlConnector;
+//using MySqlConnector;
+using Npgsql;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -47,17 +49,15 @@ public static class FaceMatch
 
     public static async Task<int> GenerateNextEnrollIdAsync(string connStr)
     {
-        using var conn = new MySqlConnection(connStr);
+        await using var conn = new NpgsqlConnection(connStr);
         await conn.OpenAsync();
 
         const string sql = @"
-        SELECT IFNULL(MAX(enrollid), 999) + 1
-        FROM tblusers_face
-        FOR UPDATE;
-        ";
+        SELECT COALESCE(MAX(enrollid), 999) + 1
+        FROM tblusers_face;
+    ";
 
-
-        using var cmd = new MySqlCommand(sql, conn);
+        await using var cmd = new NpgsqlCommand(sql, conn);
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
@@ -126,13 +126,13 @@ public static class FaceMatch
         // ============================
         try
         {
-            using var conn = new MySqlConnection(connStr);
+            using var conn = new NpgsqlConnection(connStr);
             conn.Open();
 
             const string sqlCount =
                 "SELECT COUNT(*) FROM tblusers_face WHERE backupnum = 50 AND record IS NOT NULL";
 
-            using (var countCmd = new MySqlCommand(sqlCount, conn))
+            using (var countCmd = new NpgsqlCommand(sqlCount, conn))
                 totalUsers = Convert.ToInt32(countCmd.ExecuteScalar());
 
             Log.Information($"[FACE] Starting embedding refresh for {totalUsers} users...");
@@ -142,7 +142,7 @@ public static class FaceMatch
         FROM tblusers_face
         WHERE backupnum = 50 AND record IS NOT NULL";
 
-            using var cmd = new MySqlCommand(sqlFaces, conn) { CommandTimeout = 300 };
+            using var cmd = new NpgsqlCommand(sqlFaces, conn) { CommandTimeout = 300 };
             using var reader = cmd.ExecuteReader();
 
             while (reader.Read())
@@ -155,7 +155,7 @@ public static class FaceMatch
                     EnrollId = id,
                     UserName = reader["username"]?.ToString() ?? "Unknown",
                     Base64 = reader["record"]?.ToString() ?? "",
-                    IsActive = Convert.ToInt32(reader["isactive"] ?? 1) == 1
+                    IsActive = reader["isactive"] == DBNull.Value || (bool)reader["isactive"]
                 });
             }
         }
@@ -237,7 +237,7 @@ public static class FaceMatch
             // 1. LIGHT snapshot
             var dbUsers = new Dictionary<int, bool>();
 
-            using (var conn = new MySqlConnection(Program.ConnectionString))
+            using (var conn = new NpgsqlConnection(Program.ConnectionString))
             {
                 await conn.OpenAsync();
 
@@ -246,7 +246,7 @@ public static class FaceMatch
                 FROM tblusers_face
                 WHERE backupnum = 50 AND record IS NOT NULL";
 
-                using var cmd = new MySqlCommand(sql, conn)
+                using var cmd = new NpgsqlCommand(sql, conn)
                 {
                     CommandTimeout = 60
                 };
@@ -256,7 +256,7 @@ public static class FaceMatch
                 while (await reader.ReadAsync())
                 {
                     int id = reader.GetInt32(0);
-                    bool active = reader.IsDBNull(1) || reader.GetInt32(1) == 1;
+                    bool active = reader.IsDBNull(1) || reader.GetBoolean(1);
                     dbUsers[id] = active;
                 }
             }
@@ -289,7 +289,7 @@ public static class FaceMatch
                 }
             }
         }
-        catch (MySqlException ex) when (ex.Number == -2)
+        catch (PostgresException ex) when (ex.SqlState == "57014")
         {
             // Timeout — expected under load
             Log.Debug("[SYNC] DB timeout — skipping this cycle");
@@ -309,7 +309,7 @@ public static class FaceMatch
     {
         try
         {
-            using var conn = new MySqlConnection(Program.ConnectionString);
+            using var conn = new NpgsqlConnection(Program.ConnectionString);
             await conn.OpenAsync();
 
             const string sql = @"
@@ -319,7 +319,7 @@ public static class FaceMatch
               AND backupnum = 50
               AND record IS NOT NULL";
 
-            using var cmd = new MySqlCommand(sql, conn)
+            using var cmd = new NpgsqlCommand(sql, conn)
             {
                 CommandTimeout = 60
             };
@@ -332,7 +332,7 @@ public static class FaceMatch
             {
                 string name = reader.GetString(0);
                 string record = reader.GetString(1);
-                bool active = reader.IsDBNull(2) || reader.GetInt32(2) == 1;
+                bool active = reader.IsDBNull(2) || reader.GetBoolean(2);
 
                 AddUserToMemory(enrollId, record, name, active);
             }

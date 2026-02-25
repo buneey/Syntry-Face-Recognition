@@ -473,7 +473,7 @@ namespace Syntery.AdminClient
                 ["cmd"] = "admin_add_user",
                 ["deviceSn"] = sn,
                 ["name"] = name,
-                ["isAdmin"] = isAdmin ? 1 : 0
+                ["isAdmin"] = isAdmin
             };
 
             // ONLY include enrollId if user typed one

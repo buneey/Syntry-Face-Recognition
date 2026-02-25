@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
-using MySqlConnector;
+//using MySqlConnector;
+using Npgsql;
 using Dapper;
 using System.Data;
 
@@ -15,7 +16,7 @@ namespace CloudDemoNet8
             _connString = connString;
         }
 
-        private IDbConnection CreateConnection() => new MySqlConnection(_connString);
+        private IDbConnection CreateConnection() => new NpgsqlConnection(_connString);
 
         // 1. Check if a user exists with specific face data
         public async Task<bool> HasFaceDataAsync(int enrollId)
@@ -28,20 +29,22 @@ namespace CloudDemoNet8
         }
 
         // 2. Insert or Update a User (Upsert)
-        public async Task UpsertUserAsync(int enrollId, string name, int backupNum, int isAdmin, string? record)
+        public async Task UpsertUserAsync(int enrollId, string name, int backupNum, bool isAdmin, string? record)
         {
             using var conn = CreateConnection();
             const string sql = @"
             INSERT INTO tblusers_face
             (enrollid, username, backupnum, admin, record, regdattime, isactive)
             VALUES
-            (@Id, @Name, @Num, @Admin, @Record, NOW(), 1)
-            ON DUPLICATE KEY UPDATE
-                username    = VALUES(username),
-                admin       = VALUES(admin),
-                record      = VALUES(record),
+            (@Id, @Name, @Num, @Admin, @Record, NOW(), TRUE)
+            ON CONFLICT (enrollid)
+            DO UPDATE SET
+                username    = EXCLUDED.username,
+                backupnum   = EXCLUDED.backupnum,
+                admin       = EXCLUDED.admin,
+                record      = EXCLUDED.record,
                 regdattime  = NOW(),
-                isactive    = 1;";
+                isactive    = TRUE;";
 
             await conn.ExecuteAsync(sql, new
             {
@@ -53,7 +56,7 @@ namespace CloudDemoNet8
             });
         }
 
-        public async Task LogAttendanceAsync(int? enrollId, string deviceSn, DateTime time, double? distance)
+        public async Task LogAttendanceAsync(int enrollId, string deviceSn, DateTime time, double? distance)
         {
             using var conn = CreateConnection();
 
@@ -105,7 +108,7 @@ namespace CloudDemoNet8
                   WHERE enrollid = @Id",
                 new
                 {
-                    Active = isActive ? 1 : 0,
+                    Active = isActive,
                     Id = enrollId
                 });
         }
@@ -133,33 +136,19 @@ namespace CloudDemoNet8
                 new { Id = enrollId });
         }
 
-        public static async Task<List<(int EnrollId, string UserName, int IsActive)>>
-            SearchUsersByNameAsync(string connStr, string name)
+        public static async Task<List<(int EnrollId, string UserName, bool IsActive)>>
+     SearchUsersByNameAsync(string connStr, string name)
         {
-            var results = new List<(int, string, int)>();
+            using var conn = new NpgsqlConnection(connStr);
 
-            using var conn = new MySqlConnection(connStr);
-            await conn.OpenAsync();
+            var rows = await conn.QueryAsync<(int EnrollId, string UserName, bool IsActive)>(
+                @"SELECT enrollid, username, isactive
+          FROM tblusers_face
+          WHERE username ILIKE @name
+          ORDER BY username",
+                new { name = $"%{name}%" });
 
-            using var cmd = new MySqlCommand(@"
-            SELECT enrollid, username, isactive
-            FROM tblusers_face
-            WHERE username LIKE @name
-            ORDER BY username", conn);
-
-            cmd.Parameters.AddWithValue("@name", $"%{name}%");
-
-            using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                results.Add((
-                    reader.GetInt32(0),
-                    reader.GetString(1),
-                    reader.GetInt32(2)
-                ));
-            }
-
-            return results;
+            return rows.ToList();
         }
 
 

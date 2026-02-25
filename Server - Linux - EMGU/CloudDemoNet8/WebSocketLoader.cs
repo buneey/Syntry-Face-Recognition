@@ -28,7 +28,7 @@ namespace CloudDemoNet8
 {
     public static class WebSocketLoader
     {
-        private static readonly SynteryRepository _repo = new(Program.ConnectionString);
+        private static SynteryRepository Repo => new(Program.ConnectionString);
 
         private static IHost? _host;
         private static readonly ConcurrentDictionary<string, WebSocketSession> _sessions = new();
@@ -53,7 +53,7 @@ namespace CloudDemoNet8
         {
             public int EnrollId { get; init; }
             public string UserName { get; init; } = "";
-            public int IsAdmin { get; init; }
+            public bool IsAdmin { get; init; }
             public int ShotsRemaining { get; set; } = 2;
 
             public DateTime StartedAt { get; init; } = DateTime.UtcNow;
@@ -137,7 +137,7 @@ namespace CloudDemoNet8
         // ---------------- ENROLLMENT ----------------
         private static readonly TimeSpan EnrollmentTimeout = TimeSpan.FromSeconds(60);
 
-        public static async Task<bool> StartFaceEnrollment(string sn, int enrollId, string username, int isAdmin)
+        public static async Task<bool> StartFaceEnrollment(string sn, int enrollId, string username, bool isAdmin)
         {
             if (_pendingEnrollmentsBySn.ContainsKey(sn))
             {
@@ -154,7 +154,7 @@ namespace CloudDemoNet8
                 return false;
             }
 
-            if (await _repo.HasFaceDataAsync(enrollId))
+            if (await Repo.HasFaceDataAsync(enrollId))
             {
                 Log.Information("[ENROLL] Rejected | Face already exists | EnrollID={EnrollId} | User={User}", enrollId, username);
                 return false;
@@ -400,13 +400,13 @@ namespace CloudDemoNet8
                 int enroll = j.Value<int>("enrollid");
                 int backup = j.Value<int>("backupnum");
                 string name = j.Value<string>("name") ?? "";
-                int admin = j.Value<int>("admin");
+                bool admin = j.Value<bool>("admin");
                 string? rec = j.Value<string>("record");
 
                 if (backup != 50 || string.IsNullOrEmpty(rec)) return;
 
                 int enrollId = await FaceMatch.GenerateNextEnrollIdAsync(Program.ConnectionString);
-                await _repo.UpsertUserAsync(enrollId, name, backup, admin, rec);
+                await Repo.UpsertUserAsync(enrollId, name, backup, admin, rec);
                 FaceMatch.AddUserToMemory(enrollId, rec, name);
 
 
@@ -479,7 +479,7 @@ namespace CloudDemoNet8
                         continue;
 
                     // 3. Persist face shot
-                    await _repo.UpsertUserAsync(
+                    await Repo.UpsertUserAsync(
                         p.EnrollId,
                         p.UserName,
                         50,
@@ -752,7 +752,7 @@ namespace CloudDemoNet8
                     // ACTIVE USER
                     await ReplyAccess(job.Session, 1, $"Welcome {user.UserName}");
 
-                    _ = _repo.LogAttendanceAsync(
+                    _ = Repo.LogAttendanceAsync(
                         id,
                         job.DeviceSn,
                         DateTime.Now,
@@ -841,7 +841,7 @@ namespace CloudDemoNet8
         {
             string sn = j.Value<string>("deviceSn") ?? "";
             string name = j.Value<string>("name") ?? "";
-            int isAdmin = j.Value<int?>("isAdmin") ?? 0;
+            bool isAdmin = j.Value<bool?>("isAdmin") ?? false;
             int? requestedEnrollId = j.Value<int?>("enrollId");
 
             Log.Information("[ADMIN_ADD] deviceSn='{SN}', name='{Name}', isAdmin={Admin}, requestedEnrollId={EnrollId}", sn, name, isAdmin, requestedEnrollId);
@@ -884,7 +884,7 @@ namespace CloudDemoNet8
                     return;
                 }
 
-                if (await _repo.HasFaceDataAsync(requestedEnrollId.Value))
+                if (await Repo.HasFaceDataAsync(requestedEnrollId.Value))
                 {
                     await SafeSendReplyAsync(
                         s,
@@ -978,7 +978,7 @@ namespace CloudDemoNet8
                 return;
             }
 
-            await _repo.DeleteUserAsync(enrollId);
+            await Repo.DeleteUserAsync(enrollId);
             FaceMatch.RemoveUserFromMemory(enrollId);
 
             Log.Information("[DELETE] Completed | EnrollID={EnrollId} | User={User}", enrollId, user.UserName);
@@ -1013,7 +1013,7 @@ namespace CloudDemoNet8
                 return;
             }
 
-            await _repo.SetUserActiveAsync(enrollId, active);
+            await Repo.SetUserActiveAsync(enrollId, active);
 
             if (FaceMatch.Users.TryGetValue(enrollId, out var u))
                 u.IsActive = active;
