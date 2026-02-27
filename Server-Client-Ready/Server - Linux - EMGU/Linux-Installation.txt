@@ -1,52 +1,15 @@
-UBUNUTU 24.04.3 LTS / BRIDGED NETWORK for VM
-
-1)
-sudo apt update
-sudo apt install -y dotnet-host-8.0 dotnet-runtime-8.0
-or
-sudo apt install -y dotnet-sdk-8.0
-
-Verify:
-dotnet --info
-Expected:
-.NET SDKs installed:
-.NET runtimes installed:
-Microsoft.NETCore.App 8.0.x
-
-
-2)
-sudo apt install -y \
-  libgtk2.0-0t64 \
-  libgeotiff5 \
-  libjpeg8 \
-  libpng16-16t64 \
-  libopenjp2-7 \
-  libavcodec60 \
-  libavformat60 \
-  libavutil58 \
-  libswscale7 \
-  liblapack3 \
-  libblas3 \
-  libhdf5-103-1t64 \
-  ffmpeg \
-  libvtk9.1t64
-
-Verify:
-ldd libcvextern.so | grep "not found"
-Expected:
-*Nothing*
-
-3) Test Server:
-
-dotnet CloudDemoNet8-Linux-EMGU.dll
-
+UBUNUTU SERVER 24.04.4 LTS / BRIDGED NETWORK for VM
 
 FOR SERVER INSTALLATION:
 sudo apt update && sudo apt update -y
 sudo apt install git -y
 sudo reboot
-git clone https:/
+git clone https://github.com/buneey/Syntry-Face-Recognition
+mv "Syntry-Face-Recognition/Server-Client-Ready/Server - Linux - EMGU" ./SyntryServer
+rm -r Syntry-Face-Recognition
+cd SyntryServer
 sudo apt install -y dotnet-sdk-8.0
+dotnet --info
 sudo apt install -y \
   libgtk2.0-0t64 \
   libgeotiff5 \
@@ -78,7 +41,125 @@ sudo apt install -y \
   gstreamer1.0-plugins-ugly \
   gstreamer1.0-libav
 
+TEST SERVER IN SERVER FILE: 
 dotnet CloudDemoNet8-Linux-EMGU.dll
+----------------------- PostgreSQL Setup ---------------------------
+sudo apt install postgresql postgresql-contrib -y
+sudo systemctl status postgresql
+sudo -i -u postgres
+psql
+CREATE DATABASE db_fb;
+CREATE USER username WITH PASSWORD 'password';
+GRANT ALL PRIVILEGES ON DATABASE db_fb TO password;
+/q
+exit
+
+psql -U username -d db_fb -h localhost
+
+CREATE TABLE tblusers_face (
+    enrollid      INTEGER PRIMARY KEY,
+    username      TEXT,
+    backupnum     INTEGER,
+    admin         BOOLEAN,
+    record        TEXT,
+    regdattime    TIMESTAMP,
+    isactive      BOOLEAN
+);
+
+CREATE TABLE tblattendance_face (
+    enrollid      INTEGER,
+    device        TEXT,
+    attendattime  TIMESTAMP
+);
+
+CREATE INDEX idx_attendance_enroll_time
+ON tblattendance_face (enrollid, attendattime DESC);
+
+
+**********************
+if it doesn't work Permission Denied (Go back to Desktop)
+sudo -i -u postgres
+psql
+ALTER DATABASE db_fb OWNER TO username;
+GRANT ALL ON SCHEMA public TO username;
+ALTER SCHEMA public OWNER TO username;
+/q
+exit
+
+Then Try adding again
+psql -U username -d db_fb -h localhost
+
+CREATE TABLE tblusers_face (
+    enrollid      INTEGER PRIMARY KEY,
+    username      TEXT,
+    backupnum     INTEGER,
+    admin         BOOLEAN,
+    record        TEXT,
+    regdattime    TIMESTAMP,
+    isactive      BOOLEAN
+);
+
+CREATE TABLE tblattendance_face (
+    enrollid      INTEGER,
+    device        TEXT,
+    attendattime  TIMESTAMP
+);
+
+CREATE INDEX idx_attendance_enroll_time
+ON tblattendance_face (enrollid, attendattime DESC);
+**********************
+
+GO TO THE SERVER FOLDER
+
+TO CHANGE postgreSQL port
+sudo find /etc/postgresql -name postgresql.conf
+sudo nano /etc/postgresql/16/main/postgresql.conf
+sudo systemctl restart postgresql
+
+*****
+Correct Connection String Structure:
+"ConnectionStrings": {
+  "Default": "Host=127.0.0.1;Port=5432;Database=db_fb;Username=username;Password=yourpassword"
+}
+***** 
+
+Enable Auto-Start PostgreSQL:
+sudo systemctl enable postgresql
+------------------------ pm2 Install ------------------------------
+sudo apt update // If needed
+sudo apt install nodejs npm -y
+node -v
+npm -v
+sudo npm install -g pm2
+pm2 -v
+
+IN SERVER FOLDER
+pm2 start "dotnet CloudDemoNet8-Linux-EMGU.dll 9010" --name syntry-1
+
+To Check:
+pm2 list
+
+To Make pm2 auto start on Reboot:
+pm2 startup
+(It will give you a command — run that command)
+pm2 save
+
+To Check logs
+pm2 log syntry-1
+
+To Delete
+pm2 delete syntry-1
+
+To Restart
+pm2 restart syntry-1
+
+To Stop
+pm2 stop syntry-1
+
+
+////////////////////////// IGNORE ////////////////////////////////////////
+
+
 ------------------------ MySQL Setup -------------------------------
 
 sudo apt install -y mysql-server
