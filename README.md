@@ -1,96 +1,100 @@
-# 📸 Syntry Face Recognition System
-Windows Server · Linux Server (Ubuntu 24.04 LTS) · Client Devices
 
-A real-time **face recognition & attendance system** built using:
+# 📸 Syntry Face Recognition System
+
+**Windows Server · Ubuntu 24.04 LTS · PostgreSQL · WebSocket · .NET 8**
+
+A real-time Face Recognition & Attendance System built using:
+
 - YuNet (Face Detection)
 - SFace (Face Recognition)
 - MiniFASNet (Anti-Spoofing)
-- WebSocket communication
-- MySQL or SQL Server
+- WebSocket (SuperSocket)
+- PostgreSQL
 - .NET 8
+- Emgu CV (OpenCV)
 
 ---
 
-## 🧠 System Architecture
+# 🧠 System Architecture
 
 [ Face Device ]
-      |
-   WebSocket
-      |
+        |
+     WebSocket
+        |
 [ Syntry Server ]
-  - Face Detection (YuNet)
-  - Face Recognition (SFace)
-  - Anti-Spoofing
-  - Attendance Logging
-      |
-   Database (MySQL / SQL Server)
+    - Face Detection (YuNet)
+    - Face Recognition (SFace)
+    - Anti-Spoofing
+    - Attendance Logging
+        |
+    PostgreSQL Database
+        |
+    Admin Client
 
 ---
 
-## ✅ Supported Platforms
+# ✅ Supported Platforms
 
 | Platform | Status |
-|--------|--------|
-| Windows 10 / 11 | ✅ Supported |
-| Ubuntu 24.04 LTS | ✅ Supported |
-| Ubuntu 22.04 | ❌ Not Supported |
-| AlmaLinux 9 / 10 | ❌ Not Supported |
+|----------|--------|
+| Windows 10 / 11 | Supported |
+| Ubuntu 24.04 LTS | Supported |
+| Ubuntu 22.04 | Not Supported |
+| AlmaLinux / RHEL | Not Supported |
 
-> ⚠️ Linux **must be Ubuntu 24.04 LTS**  
-> Older distros fail due to OpenCV + glibc native dependency issues.
+Linux must be Ubuntu 24.04 LTS due to EmguCV native dependency requirements.
 
 ---
 
-# 🖥️ SERVER REQUIREMENTS
+# 🖥 Server Requirements
 
-### Hardware
+## Hardware
 - x64 CPU
-- Minimum 4 GB RAM (8 GB recommended)
-- SSD storage
+- Minimum 4GB RAM (8GB recommended)
+- SSD recommended
 
-### Software
+## Software
 - .NET 8 Runtime
-- Emgu.CV (OpenCV)
-- MySQL or SQL Server
-- Native Linux libraries (Linux only)
+- Emgu.CV native runtime
+- PostgreSQL 16+
+- Required Linux native libraries
 
 ---
 
-# 🪟 WINDOWS SERVER SETUP
+# Windows Server Setup
 
-## 1️⃣ Install .NET 8 Runtime
-Download:
+## Install .NET 8 Runtime
 https://dotnet.microsoft.com/download/dotnet/8.0
 
 Verify:
 dotnet --info
 
-Configure appsettings.json
+## Configure appsettings.json
 
-Run the Server:
-Server_Start_7790
+{
+  "ConnectionStrings": {
+    "Default": "Host=127.0.0.1;Port=5432;Database=db_fb;Username=syntry_user;Password=StrongPassword123!"
+  }
+}
 
-# LINUX SERVER SETUP
-UBUNUTU 24.04 LTS / BRIDGED NETWORK for VM
+## Run Server
 
-1)
+dotnet CloudDemoNet8.dll 9010
+
+---
+
+# Ubuntu 24.04 Server Setup
+
+## Install .NET 8
+
 sudo apt update
-
 sudo apt install -y dotnet-host-8.0 dotnet-runtime-8.0
-
-or
-
-sudo apt install -y dotnet-sdk-8.0
 
 Verify:
 dotnet --info
-Expected:
-.NET SDKs installed:
-.NET runtimes installed:
-Microsoft.NETCore.App 8.0.x
 
+## Install Required Native Libraries
 
-2)
 sudo apt install -y \
   libgtk2.0-0t64 \
   libgeotiff5 \
@@ -109,80 +113,81 @@ sudo apt install -y \
 
 Verify:
 ldd libcvextern.so | grep "not found"
-Expected:
-*Nothing*
 
-3) Test Server:
+---
 
-dotnet CloudDemoNet8-Linux-EMGU.dll
+# PostgreSQL Setup
 
------------------------- MySQL Setup -------------------------------
+sudo apt install -y postgresql
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
 
-sudo apt install -y mysql-server
-
-sudo systemctl enable mysql
-
-sudo systemctl start mysql
-
-sudo mysql
+sudo -u postgres psql
 
 CREATE DATABASE db_fb;
-CREATE USER 'syntry_user'@'%' IDENTIFIED BY 'StrongPassword123!';
-GRANT ALL PRIVILEGES ON db_fb.* TO 'syntry_user'@'%';
-FLUSH PRIVILEGES;
-EXIT;
 
-mysql -u syntry_user -p db_fb
+CREATE USER syntry_user WITH PASSWORD 'StrongPassword123!';
 
+GRANT ALL PRIVILEGES ON DATABASE db_fb TO syntry_user;
+
+\c db_fb
 
 CREATE TABLE tblusers_face (
-  enrollid INT NOT NULL PRIMARY KEY,
-  username TEXT,
-  backupnum INT,
-  admin INT,
-  record LONGTEXT,
-  regdattime DATETIME,
-  isactive INT
+    enrollid      INTEGER PRIMARY KEY,
+    username      TEXT,
+    backupnum     INTEGER,
+    admin         BOOLEAN,
+    record        TEXT,
+    regdattime    TIMESTAMP,
+    isactive      BOOLEAN
 );
 
 CREATE TABLE tblattendance_face (
-  enrollid TEXT,
-  device TEXT,
-  attendattime DATETIME
+    enrollid      INTEGER,
+    device        TEXT,
+    attendattime  TIMESTAMP
 );
 
-FROM INSIDE THE SERVER FOLDER:
-export LD_LIBRARY_PATH=$PWD:$PWD/runtimes/ubuntu-x64/native:$LD_LIBRARY_PATH
+CREATE INDEX idx_attendance_enroll_time
+ON tblattendance_face (enrollid, attendattime DESC);
 
-RUN Server:
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO syntry_user;
 
-dotnet CloudDemoNet8-Linux-EMGU.dll
+---
 
-To Find Server IP:
-ip a
+# Production Run (PM2)
 
------------------------- RUNS THE SERVER ---------------------------
+sudo apt install -y npm
+sudo npm install -g pm2
 
-PROBLEMS:
+Single instance:
+pm2 start dotnet --name syntry -- CloudDemoNet8-Linux-EMGU.dll 9010
 
-❌ Ubuntu 22.04
+Multiple instances:
+pm2 start dotnet --name syntry-1 -- CloudDemoNet8-Linux-EMGU.dll 9010
+pm2 start dotnet --name syntry-2 -- CloudDemoNet8-Linux-EMGU.dll 9011
 
-glibc 2.35
+pm2 save
+pm2 startup
 
-EmguCV requires ≥ 2.38
+---
 
-Impossible without recompiling OpenCV
+# Networking Notes
 
-❌ AlmaLinux
+If running inside VM:
+- Use Bridged Adapter
+- Ensure required ports are opened in firewall or security group
 
-Older glibc
+---
 
-Missing VTK / LAPACK ABI versions
+# Known Limitations
 
-Emgu runtime not built for RHEL ecosystem
+Ubuntu 22.04 not supported due to older glibc.
+AlmaLinux / RHEL not supported due to ABI mismatch.
+net8.0-windows target not supported on Linux.
 
-❌ net8.0-windows
+---
 
-Forces Windows APIs
+# License
 
-Breaks Linux runtime resolution
+Internal / Private Deployment Only
