@@ -37,7 +37,7 @@ A real-time Face Recognition & Attendance System built using:
 
   Platform           Status
   ------------------ ---------------
-  Windows 10 / 11    Supported
+  Windows 11    Supported
   Ubuntu 24.04 LTS   Supported
   Ubuntu 22.04       Not Supported
   AlmaLinux / RHEL   Not Supported
@@ -46,7 +46,7 @@ Ubuntu 24.04 is required due to EmguCV native dependency compatibility.
 
 ------------------------------------------------------------------------
 
-# 🐧 Ubuntu 24.04.4 LTS Installation (Bridged Network VM)
+# 🐧 Ubuntu 24.04.4 Server LTS Installation (Bridged Network VM)
 
 > VM must use **Bridged Network** if devices are on the same LAN.
 
