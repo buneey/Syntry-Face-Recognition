@@ -1,137 +1,144 @@
-
 # 📸 Syntry Face Recognition System
 
-**Windows Server · Ubuntu 24.04 LTS · PostgreSQL · WebSocket · .NET 8**
+**Windows Server · Ubuntu 24.04.4 LTS · PostgreSQL · WebSocket · .NET
+8**
 
 A real-time Face Recognition & Attendance System built using:
 
-- YuNet (Face Detection)
-- SFace (Face Recognition)
-- MiniFASNet (Anti-Spoofing)
-- WebSocket (SuperSocket)
-- PostgreSQL
-- .NET 8
-- Emgu CV (OpenCV)
+-   YuNet (Face Detection)
+-   SFace (Face Recognition)
+-   MiniFASNet (Anti-Spoofing)
+-   WebSocket (SuperSocket)
+-   PostgreSQL
+-   .NET 8
+-   Emgu CV (OpenCV)
 
----
+------------------------------------------------------------------------
 
 # 🧠 System Architecture
 
-[ Face Device ]
-        |
-     WebSocket
-        |
-[ Syntry Server ]
-    - Face Detection (YuNet)
-    - Face Recognition (SFace)
-    - Anti-Spoofing
-    - Attendance Logging
-        |
-    PostgreSQL Database
-        |
-    Admin Client
+    [ Face Device ]
+            |
+         WebSocket
+            |
+    [ Syntry Server ]
+        - Face Detection (YuNet)
+        - Face Recognition (SFace)
+        - Anti-Spoofing
+        - Attendance Logging
+            |
+        PostgreSQL Database
+            |
+        Admin Client
 
----
+------------------------------------------------------------------------
 
 # ✅ Supported Platforms
 
-| Platform | Status |
-|----------|--------|
-| Windows 10 / 11 | Supported |
-| Ubuntu 24.04 LTS | Supported |
-| Ubuntu 22.04 | Not Supported |
-| AlmaLinux / RHEL | Not Supported |
+  Platform           Status
+  ------------------ ---------------
+  Windows 10 / 11    Supported
+  Ubuntu 24.04 LTS   Supported
+  Ubuntu 22.04       Not Supported
+  AlmaLinux / RHEL   Not Supported
 
-Linux must be Ubuntu 24.04 LTS due to EmguCV native dependency requirements.
+Ubuntu 24.04 is required due to EmguCV native dependency compatibility.
 
----
+------------------------------------------------------------------------
 
-# 🖥 Server Requirements
+# 🐧 Ubuntu 24.04.4 LTS Installation (Bridged Network VM)
 
-## Hardware
-- x64 CPU
-- Minimum 4GB RAM (8GB recommended)
-- SSD recommended
+> VM must use **Bridged Network** if devices are on the same LAN.
 
-## Software
-- .NET 8 Runtime
-- Emgu.CV native runtime
-- PostgreSQL 16+
-- Required Linux native libraries
+## 1️⃣ Initial Server Setup
 
----
+``` bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install git -y
+sudo reboot
+```
 
-# Windows Server Setup
+Clone repository:
 
-## Install .NET 8 Runtime
-https://dotnet.microsoft.com/download/dotnet/8.0
+``` bash
+git clone https://github.com/buneey/Syntry-Face-Recognition
+mv "Syntry-Face-Recognition/Server-Client-Ready/Server - Linux - EMGU" ./SyntryServer
+rm -r Syntry-Face-Recognition
+cd SyntryServer
+```
 
-Verify:
+------------------------------------------------------------------------
+
+## 2️⃣ Install .NET 8
+
+``` bash
+sudo apt install -y dotnet-sdk-8.0
 dotnet --info
+```
 
-## Configure appsettings.json
+------------------------------------------------------------------------
 
-{
-  "ConnectionStrings": {
-    "Default": "Host=127.0.0.1;Port=5432;Database=db_fb;Username=syntry_user;Password=StrongPassword123!"
-  }
-}
+## 3️⃣ Install Required Native Libraries
 
-## Run Server
+``` bash
+sudo apt install -y   libgtk2.0-0t64   libgeotiff5   libjpeg8   libpng16-16t64   libopenjp2-7   libavcodec60   libavformat60   libavutil58   libswscale7   liblapack3   libblas3   libhdf5-103-1t64   ffmpeg   libvtk9.1t64
+```
 
-dotnet CloudDemoNet8.dll 9010
+Verify OpenCV:
 
----
-
-# Ubuntu 24.04 Server Setup
-
-## Install .NET 8
-
-sudo apt update
-sudo apt install -y dotnet-host-8.0 dotnet-runtime-8.0
-
-Verify:
-dotnet --info
-
-## Install Required Native Libraries
-
-sudo apt install -y \
-  libgtk2.0-0t64 \
-  libgeotiff5 \
-  libjpeg8 \
-  libpng16-16t64 \
-  libopenjp2-7 \
-  libavcodec60 \
-  libavformat60 \
-  libavutil58 \
-  libswscale7 \
-  liblapack3 \
-  libblas3 \
-  libhdf5-103-1t64 \
-  ffmpeg \
-  libvtk9.1t64
-
-Verify:
+``` bash
 ldd libcvextern.so | grep "not found"
+```
 
----
+Expected: No output.
 
-# PostgreSQL Setup
+### Optional (if required)
 
-sudo apt install -y postgresql
+``` bash
+sudo apt install -y   libgstreamer1.0-0   libgstreamer-plugins-base1.0-0   gstreamer1.0-plugins-base   gstreamer1.0-plugins-good   gstreamer1.0-plugins-bad   gstreamer1.0-plugins-ugly   gstreamer1.0-libav
+```
+
+------------------------------------------------------------------------
+
+## 4️⃣ Test Server
+
+``` bash
+dotnet CloudDemoNet8-Linux-EMGU.dll
+```
+
+------------------------------------------------------------------------
+
+# 🗄 PostgreSQL Setup
+
+Install:
+
+``` bash
+sudo apt install postgresql postgresql-contrib -y
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
+sudo -i -u postgres
+psql
+```
 
-sudo -u postgres psql
+Create database and user:
 
+``` sql
 CREATE DATABASE db_fb;
+CREATE USER username WITH PASSWORD 'password';
+GRANT ALL PRIVILEGES ON DATABASE db_fb TO username;
+\q
+exit
+```
 
-CREATE USER syntry_user WITH PASSWORD 'StrongPassword123!';
+Connect:
 
-GRANT ALL PRIVILEGES ON DATABASE db_fb TO syntry_user;
+``` bash
+psql -U username -d db_fb -h localhost
+```
 
-\c db_fb
+Create tables:
 
+``` sql
 CREATE TABLE tblusers_face (
     enrollid      INTEGER PRIMARY KEY,
     username      TEXT,
@@ -150,44 +157,89 @@ CREATE TABLE tblattendance_face (
 
 CREATE INDEX idx_attendance_enroll_time
 ON tblattendance_face (enrollid, attendattime DESC);
+```
 
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO syntry_user;
+### If Permission Denied
 
----
+``` bash
+sudo -i -u postgres
+psql
+ALTER DATABASE db_fb OWNER TO username;
+GRANT ALL ON SCHEMA public TO username;
+ALTER SCHEMA public OWNER TO username;
+\q
+exit
+```
 
-# Production Run (PM2)
+Then retry table creation.
 
-sudo apt install -y npm
+------------------------------------------------------------------------
+
+## PostgreSQL Port Change (Optional)
+
+``` bash
+sudo find /etc/postgresql -name postgresql.conf
+sudo nano /etc/postgresql/16/main/postgresql.conf
+sudo systemctl restart postgresql
+```
+
+Correct connection string:
+
+``` json
+"ConnectionStrings": {
+  "Default": "Host=127.0.0.1;Port=5432;Database=db_fb;Username=username;Password=yourpassword"
+}
+```
+
+------------------------------------------------------------------------
+
+# 🚀 PM2 Production Setup
+
+Install Node & PM2:
+
+``` bash
+sudo apt update
+sudo apt install nodejs npm -y
 sudo npm install -g pm2
+pm2 -v
+```
 
-Single instance:
-pm2 start dotnet --name syntry -- CloudDemoNet8-Linux-EMGU.dll 9010
+Run server:
 
-Multiple instances:
-pm2 start dotnet --name syntry-1 -- CloudDemoNet8-Linux-EMGU.dll 9010
-pm2 start dotnet --name syntry-2 -- CloudDemoNet8-Linux-EMGU.dll 9011
+``` bash
+pm2 start "dotnet CloudDemoNet8-Linux-EMGU.dll 9010" --name syntry-1
+```
 
-pm2 save
+Commands:
+
+``` bash
+pm2 list
+pm2 logs syntry-1
+pm2 restart syntry-1
+pm2 stop syntry-1
+pm2 delete syntry-1
+```
+
+Auto-start on reboot:
+
+``` bash
 pm2 startup
+# Run the command it provides
+pm2 save
+```
 
----
+------------------------------------------------------------------------
 
-# Networking Notes
+# 🌐 Find Server IP
 
-If running inside VM:
-- Use Bridged Adapter
-- Ensure required ports are opened in firewall or security group
+``` bash
+ip a
+```
 
----
+------------------------------------------------------------------------
 
-# Known Limitations
+# ⚠ Known Issues
 
-Ubuntu 22.04 not supported due to older glibc.
-AlmaLinux / RHEL not supported due to ABI mismatch.
-net8.0-windows target not supported on Linux.
-
----
-
-# License
-
-Internal / Private Deployment Only
+-   Ubuntu 22.04 not supported (glibc too old)
+-   AlmaLinux / RHEL not supported (ABI mismatch)
+-   net8.0-windows target not compatible with Linux runtime
